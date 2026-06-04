@@ -543,26 +543,41 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
             return nil;
         }
 
-        CGSize size = [self pixelSizeFromImageData:photoData];
+        CGSize size = [self outputPhotoSizeFromOriginalPhotoData:photoData virtualImage:self.lastPhotoImage];
         if (size.width <= 0 || size.height <= 0) {
             return self.lastJPEGData;
-        }
-        NSNumber *orientation = [self orientationFromImageData:photoData];
-        if (!orientation && size.width > size.height) {
-            orientation = @6;
         }
 
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
         NSData *jpeg = [self JPEGFromImage:self.lastPhotoImage
                                      width:(size_t)size.width
                                     height:(size_t)size.height
-                               orientation:orientation
+                               orientation:nil
                                 colorSpace:colorSpace];
         if (colorSpace) {
             CGColorSpaceRelease(colorSpace);
         }
         return jpeg ?: self.lastJPEGData;
     }
+}
+
+- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData virtualImage:(CIImage *)image {
+    CGSize original = [self pixelSizeFromImageData:photoData];
+    CGRect extent = image.extent;
+    if (CGRectIsEmpty(extent)) {
+        return original;
+    }
+    if (original.width <= 0 || original.height <= 0) {
+        return CGSizeMake(CGRectGetWidth(extent), CGRectGetHeight(extent));
+    }
+
+    BOOL originalLandscape = original.width > original.height;
+    BOOL virtualLandscape = CGRectGetWidth(extent) > CGRectGetHeight(extent);
+    if (originalLandscape != virtualLandscape) {
+        return CGSizeMake(original.height, original.width);
+    }
+
+    return original;
 }
 
 - (CGSize)pixelSizeFromImageData:(NSData *)data {
