@@ -1,0 +1,31 @@
+name: Build Rootless Deb
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          brew install ldid xz dpkg make
+
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Build Rootless package
+        run: |
+          THEOS_PACKAGE_SCHEME=rootless make clean package
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: VCamInject-rootless-deb
+          path: packages/*.deb

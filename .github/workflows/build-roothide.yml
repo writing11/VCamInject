@@ -1,0 +1,35 @@
+name: Build RootHide Deb
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          brew install ldid xz dpkg make
+
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Build RootHide package
+        run: |
+          THEOS_PACKAGE_SCHEME=roothide make clean package
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: VCamInject-roothide-deb
+          path: packages/*.deb
