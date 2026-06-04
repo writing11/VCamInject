@@ -143,7 +143,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return nil;
     }
 
-    CMSampleBufferRef retimed = [self copyScaledVideoSampleBuffer:next like:sampleBuffer];
+    CMSampleBufferRef retimed = [self copyInPlaceVideoSampleBuffer:next like:sampleBuffer];
     CFRelease(next);
     return retimed;
 }
@@ -360,6 +360,57 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 
     return outBuffer;
+}
+
+- (nullable CMSampleBufferRef)copyInPlaceVideoSampleBuffer:(CMSampleBufferRef)source like:(CMSampleBufferRef)reference {
+    CVImageBufferRef sourceImage = CMSampleBufferGetImageBuffer(source);
+    CVImageBufferRef referenceImage = CMSampleBufferGetImageBuffer(reference);
+    if (!sourceImage || !referenceImage) {
+        CFRetain(reference);
+        return reference;
+    }
+
+    size_t dstWidth = CVPixelBufferGetWidth(referenceImage);
+    size_t dstHeight = CVPixelBufferGetHeight(referenceImage);
+    if (dstWidth == 0 || dstHeight == 0) {
+        CFRetain(reference);
+        return reference;
+    }
+
+    CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    CGRect src = image.extent;
+    if (CGRectIsEmpty(src)) {
+        CFRetain(reference);
+        return reference;
+    }
+
+    CGFloat scale = MAX((CGFloat)dstWidth / CGRectGetWidth(src), (CGFloat)dstHeight / CGRectGetHeight(src));
+    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
+    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
+    CGFloat tx = ((CGFloat)dstWidth - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
+    CGFloat ty = ((CGFloat)dstHeight - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
+    CGAffineTransform transform = CGAffineTransformMake(scale, 0, 0, scale, tx, ty);
+    CIImage *scaled = [image imageByApplyingTransform:transform];
+
+    CVReturn lock = CVPixelBufferLockBaseAddress((CVPixelBufferRef)referenceImage, 0);
+    if (lock != kCVReturnSuccess) {
+        CFRetain(reference);
+        return reference;
+    }
+
+    CIContext *context = [self sharedCIContext];
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    [context render:scaled
+      toCVPixelBuffer:(CVPixelBufferRef)referenceImage
+               bounds:CGRectMake(0, 0, dstWidth, dstHeight)
+           colorSpace:colorSpace];
+    if (colorSpace) {
+        CGColorSpaceRelease(colorSpace);
+    }
+    CVPixelBufferUnlockBaseAddress((CVPixelBufferRef)referenceImage, 0);
+
+    CFRetain(reference);
+    return reference;
 }
 
 - (CIContext *)sharedCIContext {
