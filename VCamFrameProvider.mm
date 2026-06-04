@@ -9,6 +9,7 @@ static NSString * const kVCamInfoPath = @"/var/mobile/Library/VCam/frame.info";
 static NSString * const kVCamVideoMP4Path = @"/var/mobile/Library/VCam/source.mp4";
 static NSString * const kVCamVideoMOVPath = @"/var/mobile/Library/VCam/source.mov";
 static NSString * const kVCamVideoM4VPath = @"/var/mobile/Library/VCam/source.m4v";
+static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled";
 
 @interface VCamFrameProvider ()
 @property (nonatomic, strong) AVAssetReader *assetReader;
@@ -29,6 +30,11 @@ static NSString * const kVCamVideoM4VPath = @"/var/mobile/Library/VCam/source.m4
 }
 
 - (nullable CMSampleBufferRef)copyVirtualSampleBufferLike:(CMSampleBufferRef)sampleBuffer {
+    if ([NSFileManager.defaultManager fileExistsAtPath:kVCamDisabledPath]) {
+        [self resetLocalVideoReader];
+        return nil;
+    }
+
     CGSize fallbackSize = [self sizeFromSampleBuffer:sampleBuffer];
     int width = (int)fallbackSize.width;
     int height = (int)fallbackSize.height;

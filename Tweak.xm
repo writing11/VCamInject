@@ -96,7 +96,7 @@ static NSTimeInterval vcamLastTwoFingerTap = 0;
     NSTimeInterval now = CACurrentMediaTime();
     if (now - vcamLastTwoFingerTap <= 0.55) {
         vcamLastTwoFingerTap = 0;
-        [[VCamVideoPicker sharedPicker] presentFromWindow:self];
+        [[VCamVideoPicker sharedPicker] presentControlPanelFromWindow:self];
     } else {
         vcamLastTwoFingerTap = now;
     }
