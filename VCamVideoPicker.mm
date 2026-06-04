@@ -94,20 +94,16 @@
                                                                    message:VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236")
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
-    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9009\u62e9\u89c6\u9891")
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9009\u62e9\u89c6\u9891\u5e76\u66ff\u6362")
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
         [self presentPhotoPickerFromWindow:window];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u5f00\u59cb\u66ff\u6362")
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u624b\u52a8\u65cb\u8f6c90\u00b0")
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
-        if (![[VCamFrameProvider sharedProvider] hasLocalVideo]) {
-            [self showMessage:VCamText("\u8bf7\u5148\u9009\u62e9\u89c6\u9891") from:top];
-            return;
-        }
-        [[VCamFrameProvider sharedProvider] enableVirtualCamera];
+        [[VCamFrameProvider sharedProvider] rotateVideoClockwise];
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u6062\u590d\u539f\u76f8\u673a")
@@ -240,7 +236,6 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             if (stableURL) {
                 [[VCamFrameProvider sharedProvider] setLocalVideoURL:stableURL];
-                [[VCamFrameProvider sharedProvider] disableVirtualCamera];
             } else {
                 [self showMessage:VCamText("\u590d\u5236\u89c6\u9891\u5931\u8d25") from:self.presentingController];
             }
