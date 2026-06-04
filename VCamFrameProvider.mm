@@ -436,17 +436,8 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
 - (CIImage *)previewImageFromSourceImage:(CVImageBufferRef)sourceImage targetWidth:(size_t)targetWidth targetHeight:(size_t)targetHeight {
     CIImage *rawImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
-    CIImage *displayImage = [self imageByApplyingVideoPreferredTransform:rawImage];
-
-    BOOL targetLandscape = targetWidth > targetHeight;
-    BOOL rawLandscape = CGRectGetWidth(rawImage.extent) > CGRectGetHeight(rawImage.extent);
-    BOOL displayPortrait = CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
-
-    CIImage *image = displayImage;
-    if (targetLandscape && rawLandscape && displayPortrait) {
-        image = rawImage;
-    }
-
+    CIImage *image = [self imageByApplyingVideoPreferredTransform:rawImage];
+    image = [self image:image byApplyingQuarterTurns:[self previewQuarterTurnsForImage:image targetWidth:targetWidth targetHeight:targetHeight]];
     return [self imageByApplyingManualRotation:image];
 }
 
@@ -469,6 +460,20 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
 - (CIImage *)imageByApplyingManualRotation:(CIImage *)image {
     return [self image:image byApplyingQuarterTurns:self.manualRotationQuarterTurns];
+}
+
+- (NSInteger)previewQuarterTurnsForImage:(CIImage *)image targetWidth:(size_t)targetWidth targetHeight:(size_t)targetHeight {
+    BOOL targetLandscape = targetWidth > targetHeight;
+    BOOL imagePortrait = CGRectGetHeight(image.extent) > CGRectGetWidth(image.extent);
+
+    if (targetLandscape && imagePortrait) {
+        return 1;
+    }
+    if (!targetLandscape && !imagePortrait) {
+        return -1;
+    }
+
+    return 0;
 }
 
 - (CIImage *)image:(CIImage *)image byApplyingQuarterTurns:(NSInteger)quarterTurns {
