@@ -9,3 +9,10 @@ VCamInject_CFLAGS = -fobjc-arc -Wall -Wextra
 VCamInject_FRAMEWORKS = AVFoundation CoreMedia CoreVideo UIKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+TOOL_NAME = vcamreceiverd
+vcamreceiverd_FILES = vcamreceiverd.c
+vcamreceiverd_CFLAGS = -Wall -Wextra -O2
+vcamreceiverd_INSTALL_PATH = /usr/local/bin
+
+include $(THEOS_MAKE_PATH)/tool.mk

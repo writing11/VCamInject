@@ -1,20 +1,29 @@
 # iOS Jailbreak Camera Replacement Tweak
 
-这个包是“替换底层相机效果”的注入层骨架。它不改摄像头硬件驱动，而是注入到使用相机的 App，拦截 AVFoundation 的视频帧回调，把真实摄像头帧替换成虚拟帧。
+这个包是“替换底层相机效果”的二合一骨架。它包含：
+
+- `VCamInject.dylib`：注入使用相机的 App，拦截 AVFoundation 的视频帧回调。
+- `vcamreceiverd`：手机端常驻服务，监听 `9999`，让 Windows 端能通过 usbmuxd 连接手机。
 
 ## 工作方式
 
-1. Windows 端把视频推到手机。
-2. 接收守护进程把视频解码成 BGRA 原始帧，写到：
+1. Windows 端通过 usbmuxd 连接手机 `9999`。
+2. `vcamreceiverd` 收到握手后回复 `0x01`，并把 H.264 流保存到：
+
+```text
+/var/mobile/Library/VCam/stream.h264
+```
+
+3. 后续需要把 H.264 解码成 BGRA 原始帧，写到：
 
 ```text
 /var/mobile/Library/VCam/frame.bgra
 /var/mobile/Library/VCam/frame.info
 ```
 
-3. 本 tweak 注入目标 App。
-4. App 调相机时，tweak 拦截 `captureOutput:didOutputSampleBuffer:fromConnection:`。
-5. 如果共享帧存在，就用虚拟帧替换真实相机帧。
+4. 本 tweak 注入目标 App。
+5. App 调相机时，tweak 拦截 `captureOutput:didOutputSampleBuffer:fromConnection:`。
+6. 如果共享帧存在，就用虚拟帧替换真实相机帧。
 
 ## 它现在为什么不是 deb
 
@@ -112,6 +121,23 @@ killall -9 SpringBoard
 ## 重要说明
 
 这个是注入层骨架。要完整显示 Windows 推来的视频，还需要把前面的 `vcamreceiverd` 从“保存 H.264 文件”升级为“解码 H.264 到 BGRA 共享帧”。否则 tweak 会退回使用真实相机帧。
+
+## 解决 Windows 端 USB 连接失败
+
+Windows 端的错误：
+
+```text
+USB 连接失败，请确认 iPhone 已连接且插件已开启监听
+```
+
+对应的就是手机端 `vcamreceiverd` 没有监听 `9999`。安装新版 deb 后，重启手机或手动加载 LaunchDaemon：
+
+```sh
+launchctl bootstrap system /var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist
+launchctl kickstart -k system/com.qianmian.vcamreceiver
+```
+
+如果 RootHide 的实际路径不是 `/var/jb`，需要按你手机上的 bootstrap 路径调整。
 
 ## 先测替换是否生效
 
