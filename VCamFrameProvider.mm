@@ -1,10 +1,21 @@
 #import "VCamFrameProvider.h"
 
+#import <AVFoundation/AVFoundation.h>
 #import <CoreVideo/CoreVideo.h>
 #import <sys/stat.h>
 
 static NSString * const kVCamFramePath = @"/var/mobile/Library/VCam/frame.bgra";
 static NSString * const kVCamInfoPath = @"/var/mobile/Library/VCam/frame.info";
+static NSString * const kVCamVideoMP4Path = @"/var/mobile/Library/VCam/source.mp4";
+static NSString * const kVCamVideoMOVPath = @"/var/mobile/Library/VCam/source.mov";
+static NSString * const kVCamVideoM4VPath = @"/var/mobile/Library/VCam/source.m4v";
+
+@interface VCamFrameProvider ()
+@property (nonatomic, strong) AVAssetReader *assetReader;
+@property (nonatomic, strong) AVAssetReaderTrackOutput *videoOutput;
+@property (nonatomic, copy) NSString *activeVideoPath;
+@property (nonatomic) time_t activeVideoMTime;
+@end
 
 @implementation VCamFrameProvider
 
@@ -31,6 +42,10 @@ static NSString * const kVCamInfoPath = @"/var/mobile/Library/VCam/frame.info";
     NSData *frameData = [NSData dataWithContentsOfFile:kVCamFramePath options:NSDataReadingMappedIfSafe error:nil];
     NSUInteger expected = (NSUInteger)width * (NSUInteger)height * 4;
     if (!frameData || frameData.length < expected) {
+        CMSampleBufferRef videoBuffer = [self copyLocalVideoSampleBufferLike:sampleBuffer];
+        if (videoBuffer) {
+            return videoBuffer;
+        }
         return nil;
     }
 
@@ -85,6 +100,121 @@ static NSString * const kVCamInfoPath = @"/var/mobile/Library/VCam/frame.info";
     }
 
     return outBuffer;
+}
+
+- (nullable CMSampleBufferRef)copyLocalVideoSampleBufferLike:(CMSampleBufferRef)sampleBuffer {
+    NSString *path = [self firstExistingVideoPath];
+    if (!path) {
+        [self resetLocalVideoReader];
+        return nil;
+    }
+
+    struct stat st;
+    if (stat(path.fileSystemRepresentation, &st) != 0) {
+        [self resetLocalVideoReader];
+        return nil;
+    }
+
+    BOOL needsReload = !self.assetReader ||
+                       ![self.activeVideoPath isEqualToString:path] ||
+                       self.activeVideoMTime != st.st_mtime ||
+                       self.assetReader.status == AVAssetReaderStatusFailed ||
+                       self.assetReader.status == AVAssetReaderStatusCancelled ||
+                       self.assetReader.status == AVAssetReaderStatusCompleted;
+
+    if (needsReload) {
+        [self configureLocalVideoReaderAtPath:path mtime:st.st_mtime];
+    }
+
+    CMSampleBufferRef next = [self.videoOutput copyNextSampleBuffer];
+    if (!next) {
+        [self configureLocalVideoReaderAtPath:path mtime:st.st_mtime];
+        next = [self.videoOutput copyNextSampleBuffer];
+    }
+
+    if (!next) {
+        return nil;
+    }
+
+    CMSampleBufferRef retimed = [self copySampleBuffer:next withTimingFrom:sampleBuffer];
+    CFRelease(next);
+    return retimed;
+}
+
+- (nullable NSString *)firstExistingVideoPath {
+    NSArray<NSString *> *paths = @[kVCamVideoMP4Path, kVCamVideoMOVPath, kVCamVideoM4VPath];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    for (NSString *path in paths) {
+        if ([fm fileExistsAtPath:path]) {
+            return path;
+        }
+    }
+    return nil;
+}
+
+- (void)resetLocalVideoReader {
+    [self.assetReader cancelReading];
+    self.assetReader = nil;
+    self.videoOutput = nil;
+    self.activeVideoPath = nil;
+    self.activeVideoMTime = 0;
+}
+
+- (void)configureLocalVideoReaderAtPath:(NSString *)path mtime:(time_t)mtime {
+    [self.assetReader cancelReading];
+    self.assetReader = nil;
+    self.videoOutput = nil;
+
+    NSURL *url = [NSURL fileURLWithPath:path];
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:url options:nil];
+    AVAssetTrack *track = [[asset tracksWithMediaType:AVMediaTypeVideo] firstObject];
+    if (!track) {
+        return;
+    }
+
+    NSError *error = nil;
+    AVAssetReader *reader = [[AVAssetReader alloc] initWithAsset:asset error:&error];
+    if (!reader || error) {
+        return;
+    }
+
+    NSDictionary *settings = @{
+        (NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)
+    };
+    AVAssetReaderTrackOutput *output = [[AVAssetReaderTrackOutput alloc] initWithTrack:track outputSettings:settings];
+    output.alwaysCopiesSampleData = NO;
+
+    if (![reader canAddOutput:output]) {
+        return;
+    }
+    [reader addOutput:output];
+
+    if (![reader startReading]) {
+        return;
+    }
+
+    self.assetReader = reader;
+    self.videoOutput = output;
+    self.activeVideoPath = path;
+    self.activeVideoMTime = mtime;
+}
+
+- (nullable CMSampleBufferRef)copySampleBuffer:(CMSampleBufferRef)source withTimingFrom:(CMSampleBufferRef)reference {
+    CMSampleTimingInfo timing;
+    OSStatus status = CMSampleBufferGetSampleTimingInfo(reference, 0, &timing);
+    if (status != noErr) {
+        CFRetain(source);
+        return source;
+    }
+
+    CMSampleBufferRef copied = NULL;
+    status = CMSampleBufferCreateCopyWithNewTiming(kCFAllocatorDefault, source, 1, &timing, &copied);
+    if (status == noErr && copied) {
+        return copied;
+    }
+
+    CFRetain(source);
+    return source;
 }
 
 - (CGSize)sizeFromSampleBuffer:(CMSampleBufferRef)sampleBuffer {

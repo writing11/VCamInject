@@ -3,6 +3,7 @@
 #import <objc/message.h>
 
 #import "VCamFrameProvider.h"
+#import "VCamVideoPicker.h"
 
 @interface VCamDelegateProxy : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
 @property (nonatomic, weak) id originalDelegate;
@@ -59,6 +60,46 @@ static const void *kVCamProxyKey = &kVCamProxyKey;
     proxy.originalDelegate = sampleBufferDelegate;
     objc_setAssociatedObject(self, kVCamProxyKey, proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     %orig((id<AVCaptureVideoDataOutputSampleBufferDelegate>)proxy, sampleBufferCallbackQueue);
+}
+
+%end
+
+static NSTimeInterval vcamLastTwoFingerTap = 0;
+
+%hook UIWindow
+
+- (void)sendEvent:(UIEvent *)event {
+    %orig(event);
+
+    if (event.type != UIEventTypeTouches) {
+        return;
+    }
+
+    NSSet<UITouch *> *touches = event.allTouches;
+    if (touches.count < 2) {
+        return;
+    }
+
+    BOOL hasBeganTouch = NO;
+    NSUInteger tapCount = 0;
+    for (UITouch *touch in touches) {
+        if (touch.phase == UITouchPhaseBegan) {
+            hasBeganTouch = YES;
+        }
+        tapCount = MAX(tapCount, touch.tapCount);
+    }
+
+    if (!hasBeganTouch || tapCount < 1) {
+        return;
+    }
+
+    NSTimeInterval now = CACurrentMediaTime();
+    if (now - vcamLastTwoFingerTap <= 0.55) {
+        vcamLastTwoFingerTap = 0;
+        [[VCamVideoPicker sharedPicker] presentFromWindow:self];
+    } else {
+        vcamLastTwoFingerTap = now;
+    }
 }
 
 %end

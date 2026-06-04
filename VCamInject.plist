@@ -1,7 +1,8 @@
 {
     Filter = {
         Classes = (
-            "AVCaptureVideoDataOutput"
+            "AVCaptureVideoDataOutput",
+            "UIWindow"
         );
     };
 }

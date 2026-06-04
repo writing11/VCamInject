@@ -25,6 +25,49 @@
 5. App 调相机时，tweak 拦截 `captureOutput:didOutputSampleBuffer:fromConnection:`。
 6. 如果共享帧存在，就用虚拟帧替换真实相机帧。
 
+## 没有电脑端时使用手机本地视频
+
+新版注入层支持本地视频兜底源。没有电脑端推流、也没有 `frame.bgra` 时，它会自动读取下面任意一个文件并循环播放：
+
+```text
+/var/mobile/Library/VCam/source.mp4
+/var/mobile/Library/VCam/source.mov
+/var/mobile/Library/VCam/source.m4v
+```
+
+使用方式：
+
+1. 从相册把视频保存/导出到文件管理器。
+2. 用 Filza 或爱思助手复制到：
+
+```text
+/var/mobile/Library/VCam/source.mp4
+```
+
+3. 重启目标 App，再打开相机页。
+
+优先级是：
+
+```text
+frame.bgra 共享帧
+source.mp4/source.mov/source.m4v 本地视频
+真实相机
+```
+
+也可以在被注入 App 里用手势选择：
+
+```text
+双指快速敲击屏幕两下
+```
+
+它会呼出相册视频选择器。选中视频后，插件会复制到：
+
+```text
+/var/mobile/Library/VCam/source.mp4
+```
+
+然后重开目标 App 的相机页即可使用本地视频替换。
+
 ## 它现在为什么不是 deb
 
 这个文件夹是 Theos 工程源码。注入 tweak 需要先编译，编译后才会在 `packages/` 目录生成 `.deb`。
