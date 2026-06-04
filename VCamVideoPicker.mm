@@ -1,14 +1,12 @@
 #import "VCamVideoPicker.h"
 #import "VCamFrameProvider.h"
 
-static NSString * const kVCamDir = @"/var/mobile/Library/VCam";
-static NSString * const kVCamMP4Path = @"/var/mobile/Library/VCam/source.mp4";
-static NSString * const kVCamMOVPath = @"/var/mobile/Library/VCam/source.mov";
-static NSString * const kVCamM4VPath = @"/var/mobile/Library/VCam/source.m4v";
-static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled";
+#import <PhotosUI/PhotosUI.h>
 
-@interface VCamVideoPicker () <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+@interface VCamVideoPicker () <PHPickerViewControllerDelegate>
 @property (nonatomic, weak) UIViewController *presentingController;
+@property (nonatomic, weak) UIWindow *controlWindow;
+@property (nonatomic, strong) UIButton *controlButton;
 @property (nonatomic, assign) BOOL presenting;
 @end
 
@@ -25,77 +23,139 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
 - (void)presentFromWindow:(UIWindow *)window {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.presenting) {
-            return;
-        }
-
-        UIViewController *root = window.rootViewController ?: [self activeRootViewController];
-        UIViewController *top = [self topViewControllerFrom:root];
-        if (!top || top.presentedViewController) {
-            return;
-        }
-
-        if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]) {
-            return;
-        }
-
-        UIImagePickerController *picker = [[UIImagePickerController alloc] init];
-        picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
-        picker.mediaTypes = @[@"public.movie"];
-        picker.videoQuality = UIImagePickerControllerQualityTypeHigh;
-        picker.delegate = self;
-
-        self.presenting = YES;
-        self.presentingController = top;
-        [top presentViewController:picker animated:YES completion:nil];
+        [self presentPhotoPickerFromWindow:window];
     });
 }
 
 - (void)presentControlPanelFromWindow:(UIWindow *)window {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *root = window.rootViewController ?: [self activeRootViewController];
-        UIViewController *top = [self topViewControllerFrom:root];
-        if (!top || top.presentedViewController) {
-            return;
-        }
-
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
-                                                                       message:@"选择虚拟相机来源"
-                                                                preferredStyle:UIAlertControllerStyleActionSheet];
-
-        [alert addAction:[UIAlertAction actionWithTitle:@"打开相册选择视频"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(__unused UIAlertAction *action) {
-            [self presentFromWindow:window];
-        }]];
-
-        [alert addAction:[UIAlertAction actionWithTitle:@"启用视频替换"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(__unused UIAlertAction *action) {
-            [[VCamFrameProvider sharedProvider] enableVirtualCamera];
-            [self showMessage:@"已启用视频替换" from:top];
-        }]];
-
-        [alert addAction:[UIAlertAction actionWithTitle:@"恢复原相机"
-                                                  style:UIAlertActionStyleDestructive
-                                                handler:^(__unused UIAlertAction *action) {
-            [[VCamFrameProvider sharedProvider] disableVirtualCamera];
-            [self showMessage:@"已恢复原相机" from:top];
-        }]];
-
-        [alert addAction:[UIAlertAction actionWithTitle:@"取消"
-                                                  style:UIAlertActionStyleCancel
-                                                handler:nil]];
-
-        UIPopoverPresentationController *popover = alert.popoverPresentationController;
-        if (popover) {
-            popover.sourceView = window;
-            popover.sourceRect = CGRectMake(CGRectGetMidX(window.bounds), CGRectGetMidY(window.bounds), 1, 1);
-            popover.permittedArrowDirections = 0;
-        }
-
-        [top presentViewController:alert animated:YES completion:nil];
+        [self toggleControlButtonInWindow:window];
     });
+}
+
+- (void)toggleControlButtonInWindow:(UIWindow *)window {
+    if (self.controlButton.superview) {
+        [self.controlButton removeFromSuperview];
+        self.controlButton = nil;
+        self.controlWindow = nil;
+        return;
+    }
+
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.frame = CGRectMake(MAX(12, window.bounds.size.width - 88), 120, 72, 40);
+    button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
+    button.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.78];
+    button.layer.cornerRadius = 20;
+    button.layer.masksToBounds = YES;
+    button.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [button setTitle:@"VCam" forState:UIControlStateNormal];
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [button addTarget:self action:@selector(controlButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(controlButtonPanned:)];
+    [button addGestureRecognizer:pan];
+
+    [window addSubview:button];
+    self.controlWindow = window;
+    self.controlButton = button;
+}
+
+- (void)controlButtonTapped:(UIButton *)sender {
+    [self showControlMenuFromButton:sender];
+}
+
+- (void)controlButtonPanned:(UIPanGestureRecognizer *)pan {
+    UIView *view = pan.view;
+    UIView *container = view.superview;
+    if (!view || !container) {
+        return;
+    }
+
+    CGPoint delta = [pan translationInView:container];
+    CGPoint center = CGPointMake(view.center.x + delta.x, view.center.y + delta.y);
+    CGFloat halfW = CGRectGetWidth(view.bounds) / 2.0;
+    CGFloat halfH = CGRectGetHeight(view.bounds) / 2.0;
+    center.x = MIN(MAX(center.x, halfW + 8), CGRectGetWidth(container.bounds) - halfW - 8);
+    center.y = MIN(MAX(center.y, halfH + 8), CGRectGetHeight(container.bounds) - halfH - 8);
+    view.center = center;
+    [pan setTranslation:CGPointZero inView:container];
+}
+
+- (void)showControlMenuFromButton:(UIButton *)button {
+    UIWindow *window = self.controlWindow ?: button.window;
+    UIViewController *top = [self topControllerForWindow:window];
+    if (!top || top.presentedViewController) {
+        return;
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
+                                                                   message:@"Camera replacement"
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Choose video and replace"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        [self presentPhotoPickerFromWindow:window];
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Restore real camera"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(__unused UIAlertAction *action) {
+        [[VCamFrameProvider sharedProvider] disableVirtualCamera];
+        [self showMessage:@"Real camera restored" from:top];
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Hide VCam button"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        [self.controlButton removeFromSuperview];
+        self.controlButton = nil;
+        self.controlWindow = nil;
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
+    UIPopoverPresentationController *popover = alert.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = button;
+        popover.sourceRect = button.bounds;
+        popover.permittedArrowDirections = UIPopoverArrowDirectionAny;
+    }
+
+    [top presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)presentPhotoPickerFromWindow:(UIWindow *)window {
+    if (self.presenting) {
+        return;
+    }
+
+    UIViewController *top = [self topControllerForWindow:window];
+    if (!top || top.presentedViewController) {
+        return;
+    }
+
+    if (@available(iOS 14.0, *)) {
+        PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
+        config.selectionLimit = 1;
+        config.filter = [PHPickerFilter videosFilter];
+
+        PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
+        picker.delegate = self;
+
+        self.presenting = YES;
+        self.presentingController = top;
+        [top presentViewController:picker animated:YES completion:nil];
+    } else {
+        [self showMessage:@"iOS 14 or newer is required" from:top];
+    }
+}
+
+- (UIViewController *)topControllerForWindow:(UIWindow *)window {
+    UIViewController *root = window.rootViewController ?: [self activeRootViewController];
+    return [self topViewControllerFrom:root];
 }
 
 - (UIViewController *)topViewControllerFrom:(UIViewController *)controller {
@@ -136,57 +196,112 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return nil;
 }
 
-- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info {
-    NSURL *mediaURL = info[UIImagePickerControllerMediaURL];
-    if (mediaURL) {
-        [[VCamFrameProvider sharedProvider] setLocalVideoURL:mediaURL];
-        [self installVideoAtURL:mediaURL];
-    }
-
+- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results API_AVAILABLE(ios(14.0)) {
     [picker dismissViewControllerAnimated:YES completion:^{
         self.presenting = NO;
+    }];
+
+    PHPickerResult *result = results.firstObject;
+    if (!result) {
         self.presentingController = nil;
+        return;
+    }
+
+    NSItemProvider *provider = result.itemProvider;
+    NSString *typeIdentifier = [self firstSupportedVideoTypeFromProvider:provider];
+    if (!typeIdentifier) {
+        [self showMessage:@"No video selected" from:self.presentingController];
+        self.presentingController = nil;
+        return;
+    }
+
+    [provider loadFileRepresentationForTypeIdentifier:typeIdentifier completionHandler:^(NSURL *url, NSError *error) {
+        if (!url || error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showMessage:@"Failed to read video" from:self.presentingController];
+                self.presentingController = nil;
+            });
+            return;
+        }
+
+        NSURL *stableURL = [self copyPickedVideoToStableTempURL:url preferredType:typeIdentifier];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (stableURL) {
+                [[VCamFrameProvider sharedProvider] setLocalVideoURL:stableURL];
+                [self showMessage:@"Video selected. Replacement enabled." from:self.presentingController];
+            } else {
+                [self showMessage:@"Failed to copy video" from:self.presentingController];
+            }
+            self.presentingController = nil;
+        });
     }];
 }
 
-- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
-    [picker dismissViewControllerAnimated:YES completion:^{
-        self.presenting = NO;
-        self.presentingController = nil;
-    }];
-}
+- (NSString *)firstSupportedVideoTypeFromProvider:(NSItemProvider *)provider {
+    NSArray<NSString *> *types = @[
+        @"public.movie",
+        @"com.apple.quicktime-movie",
+        @"public.mpeg-4",
+        @"public.avi"
+    ];
 
-- (void)installVideoAtURL:(NSURL *)url {
-    NSFileManager *fm = NSFileManager.defaultManager;
-    [fm createDirectoryAtPath:kVCamDir withIntermediateDirectories:YES attributes:nil error:nil];
-
-    [fm removeItemAtPath:kVCamMP4Path error:nil];
-    [fm removeItemAtPath:kVCamMOVPath error:nil];
-    [fm removeItemAtPath:kVCamM4VPath error:nil];
-
-    NSString *ext = url.pathExtension.lowercaseString;
-    NSString *target = kVCamMP4Path;
-    if ([ext isEqualToString:@"mov"]) {
-        target = kVCamMOVPath;
-    } else if ([ext isEqualToString:@"m4v"]) {
-        target = kVCamM4VPath;
-    }
-
-    NSError *error = nil;
-    if (![fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:target] error:&error]) {
-        NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&error];
-        if (data) {
-            [data writeToFile:target atomically:YES];
+    for (NSString *type in types) {
+        if ([provider hasItemConformingToTypeIdentifier:type]) {
+            return type;
         }
     }
+
+    return nil;
+}
+
+- (NSURL *)copyPickedVideoToStableTempURL:(NSURL *)url preferredType:(NSString *)typeIdentifier {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *ext = url.pathExtension.length > 0 ? url.pathExtension.lowercaseString : [self extensionForType:typeIdentifier];
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"VCamSelected"];
+    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    for (NSString *oldExt in @[@"mp4", @"mov", @"m4v", @"avi"]) {
+        NSString *oldPath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"selected.%@", oldExt]];
+        [fm removeItemAtPath:oldPath error:nil];
+    }
+
+    NSString *targetPath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"selected.%@", ext]];
+    NSURL *targetURL = [NSURL fileURLWithPath:targetPath];
+    [fm removeItemAtURL:targetURL error:nil];
+
+    NSError *copyError = nil;
+    if ([fm copyItemAtURL:url toURL:targetURL error:&copyError]) {
+        return targetURL;
+    }
+
+    NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&copyError];
+    if (data && [data writeToURL:targetURL atomically:YES]) {
+        return targetURL;
+    }
+
+    return nil;
+}
+
+- (NSString *)extensionForType:(NSString *)typeIdentifier {
+    if ([typeIdentifier isEqualToString:@"public.mpeg-4"]) {
+        return @"mp4";
+    }
+    if ([typeIdentifier isEqualToString:@"public.avi"]) {
+        return @"avi";
+    }
+    return @"mov";
 }
 
 - (void)showMessage:(NSString *)message from:(UIViewController *)controller {
+    if (!controller || controller.presentedViewController) {
+        return;
+    }
+
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [controller presentViewController:alert animated:YES completion:^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [alert dismissViewControllerAnimated:YES completion:nil];
         });
     }];
