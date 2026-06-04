@@ -464,9 +464,11 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
     CIImage *normalized = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
 
-    NSData *jpeg = [[self sharedCIContext] JPEGRepresentationOfImage:normalized
-                                                          colorSpace:colorSpace
-                                                             options:@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.9}];
+    NSData *jpeg = [self JPEGFromImage:normalized
+                                 width:(size_t)CGRectGetWidth(normalized.extent)
+                                height:(size_t)CGRectGetHeight(normalized.extent)
+                           orientation:nil
+                            colorSpace:colorSpace];
     if (jpeg.length > 0) {
         self.lastJPEGData = jpeg;
         self.lastPhotoImage = normalized;
@@ -493,11 +495,16 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         if (size.width <= 0 || size.height <= 0) {
             return self.lastJPEGData;
         }
+        NSNumber *orientation = [self orientationFromImageData:photoData];
+        if (!orientation && size.width > size.height) {
+            orientation = @6;
+        }
 
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
         NSData *jpeg = [self JPEGFromImage:self.lastPhotoImage
                                      width:(size_t)size.width
                                     height:(size_t)size.height
+                               orientation:orientation
                                 colorSpace:colorSpace];
         if (colorSpace) {
             CGColorSpaceRelease(colorSpace);
@@ -523,7 +530,23 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return CGSizeMake(width.doubleValue, height.doubleValue);
 }
 
-- (nullable NSData *)JPEGFromImage:(CIImage *)image width:(size_t)width height:(size_t)height colorSpace:(CGColorSpaceRef)colorSpace {
+- (nullable NSNumber *)orientationFromImageData:(NSData *)data {
+    if (data.length == 0) {
+        return nil;
+    }
+
+    CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+    if (!source) {
+        return nil;
+    }
+
+    NSDictionary *props = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, NULL));
+    CFRelease(source);
+    NSNumber *orientation = props[(NSString *)kCGImagePropertyOrientation];
+    return orientation;
+}
+
+- (nullable NSData *)JPEGFromImage:(CIImage *)image width:(size_t)width height:(size_t)height orientation:(nullable NSNumber *)orientation colorSpace:(CGColorSpaceRef)colorSpace {
     if (!image || width == 0 || height == 0) {
         return nil;
     }
@@ -541,9 +564,35 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     CIImage *scaled = [image imageByApplyingTransform:CGAffineTransformMake(scale, 0, 0, scale, tx, ty)];
     CIImage *cropped = [scaled imageByCroppingToRect:CGRectMake(0, 0, width, height)];
 
-    return [[self sharedCIContext] JPEGRepresentationOfImage:cropped
-                                                  colorSpace:colorSpace
-                                                     options:@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.92}];
+    NSMutableDictionary *options = [@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.92} mutableCopy];
+    if (orientation) {
+        options[(NSString *)kCGImagePropertyOrientation] = orientation;
+    }
+
+    CGImageRef cgImage = [[self sharedCIContext] createCGImage:cropped
+                                                      fromRect:CGRectMake(0, 0, width, height)
+                                                        format:kCIFormatRGBA8
+                                                    colorSpace:colorSpace];
+    if (!cgImage) {
+        return nil;
+    }
+
+    NSMutableData *data = [NSMutableData data];
+    CGImageDestinationRef destination = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)data,
+                                                                        CFSTR("public.jpeg"),
+                                                                        1,
+                                                                        NULL);
+    if (!destination) {
+        CGImageRelease(cgImage);
+        return nil;
+    }
+
+    CGImageDestinationAddImage(destination, cgImage, (__bridge CFDictionaryRef)options);
+    BOOL ok = CGImageDestinationFinalize(destination);
+    CFRelease(destination);
+    CGImageRelease(cgImage);
+
+    return ok ? data : nil;
 }
 
 - (CIContext *)sharedCIContext {
