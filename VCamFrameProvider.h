@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)enableVirtualCamera;
 - (void)disableVirtualCamera;
 - (BOOL)isVirtualCameraEnabled;
+- (BOOL)hasLocalVideo;
 @end
 
 NS_ASSUME_NONNULL_END

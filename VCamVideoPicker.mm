@@ -3,6 +3,8 @@
 
 #import <PhotosUI/PhotosUI.h>
 
+#define VCamText(x) @x
+
 @interface VCamVideoPicker () <PHPickerViewControllerDelegate>
 @property (nonatomic, weak) UIViewController *presentingController;
 @property (nonatomic, weak) UIWindow *controlWindow;
@@ -48,7 +50,7 @@
     button.layer.cornerRadius = 20;
     button.layer.masksToBounds = YES;
     button.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-    [button setTitle:@"虚拟相机" forState:UIControlStateNormal];
+    [button setTitle:VCamText("\u865a\u62df\u76f8\u673a") forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [button addTarget:self action:@selector(controlButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -89,23 +91,33 @@
     }
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
-                                                                   message:@"虚拟相机控制"
+                                                                   message:VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236")
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"选择视频并替换"
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9009\u62e9\u89c6\u9891")
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
         [self presentPhotoPickerFromWindow:window];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"恢复原相机"
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u5f00\u59cb\u66ff\u6362")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        if (![[VCamFrameProvider sharedProvider] hasLocalVideo]) {
+            [self showMessage:VCamText("\u8bf7\u5148\u9009\u62e9\u89c6\u9891") from:top];
+            return;
+        }
+        [[VCamFrameProvider sharedProvider] enableVirtualCamera];
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u6062\u590d\u539f\u76f8\u673a")
                                               style:UIAlertActionStyleDestructive
                                             handler:^(__unused UIAlertAction *action) {
         [[VCamFrameProvider sharedProvider] disableVirtualCamera];
-        [self showMessage:@"已恢复原相机" from:top];
+        [self showMessage:VCamText("\u5df2\u6062\u590d\u539f\u76f8\u673a") from:top];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"隐藏悬浮按钮"
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9690\u85cf\u60ac\u6d6e\u6309\u94ae")
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
         [self.controlButton removeFromSuperview];
@@ -113,7 +125,7 @@
         self.controlWindow = nil;
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消"
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u53d6\u6d88")
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
 
@@ -149,7 +161,7 @@
         self.presentingController = top;
         [top presentViewController:picker animated:YES completion:nil];
     } else {
-        [self showMessage:@"需要 iOS 14 或更新版本" from:top];
+        [self showMessage:VCamText("\u9700\u8981 iOS 14 \u6216\u66f4\u65b0\u7248\u672c") from:top];
     }
 }
 
@@ -210,7 +222,7 @@
     NSItemProvider *provider = result.itemProvider;
     NSString *typeIdentifier = [self firstSupportedVideoTypeFromProvider:provider];
     if (!typeIdentifier) {
-        [self showMessage:@"没有选择视频" from:self.presentingController];
+        [self showMessage:VCamText("\u6ca1\u6709\u9009\u62e9\u89c6\u9891") from:self.presentingController];
         self.presentingController = nil;
         return;
     }
@@ -218,7 +230,7 @@
     [provider loadFileRepresentationForTypeIdentifier:typeIdentifier completionHandler:^(NSURL *url, NSError *error) {
         if (!url || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self showMessage:@"读取视频失败" from:self.presentingController];
+                [self showMessage:VCamText("\u8bfb\u53d6\u89c6\u9891\u5931\u8d25") from:self.presentingController];
                 self.presentingController = nil;
             });
             return;
@@ -228,8 +240,9 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             if (stableURL) {
                 [[VCamFrameProvider sharedProvider] setLocalVideoURL:stableURL];
+                [[VCamFrameProvider sharedProvider] disableVirtualCamera];
             } else {
-                [self showMessage:@"复制视频失败" from:self.presentingController];
+                [self showMessage:VCamText("\u590d\u5236\u89c6\u9891\u5931\u8d25") from:self.presentingController];
             }
             self.presentingController = nil;
         });
@@ -270,11 +283,6 @@
 
     NSError *copyError = nil;
     if ([fm copyItemAtURL:url toURL:targetURL error:&copyError]) {
-        return targetURL;
-    }
-
-    NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&copyError];
-    if (data && [data writeToURL:targetURL atomically:YES]) {
         return targetURL;
     }
 

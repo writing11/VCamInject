@@ -20,6 +20,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) NSURL *selectedVideoURL;
 @property (nonatomic, strong) NSURL *activeVideoURL;
 @property (nonatomic, strong) CIContext *ciContext;
+@property (nonatomic, assign) NSTimeInterval activationTime;
 @property (nonatomic, assign) BOOL disabledInProcess;
 @end
 
@@ -151,6 +152,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     @synchronized (self) {
     self.selectedVideoURL = url;
     self.disabledInProcess = NO;
+    self.activationTime = [NSDate timeIntervalSinceReferenceDate] + 1.2;
     [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
     [self resetLocalVideoReader];
     }
@@ -159,6 +161,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 - (void)enableVirtualCamera {
     @synchronized (self) {
     self.disabledInProcess = NO;
+    self.activationTime = [NSDate timeIntervalSinceReferenceDate] + 0.4;
     [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
     }
 }
@@ -177,7 +180,14 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     if (self.disabledInProcess) {
         return NO;
     }
+    if (self.activationTime > 0 && [NSDate timeIntervalSinceReferenceDate] < self.activationTime) {
+        return NO;
+    }
     return ![NSFileManager.defaultManager fileExistsAtPath:kVCamDisabledPath];
+}
+
+- (BOOL)hasLocalVideo {
+    return self.selectedVideoURL != nil || [self firstExistingVideoPath] != nil;
 }
 
 - (nullable NSURL *)currentVideoURL {
@@ -279,7 +289,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
     size_t dstWidth = CVPixelBufferGetWidth(referenceImage);
     size_t dstHeight = CVPixelBufferGetHeight(referenceImage);
-    OSType dstFormat = CVPixelBufferGetPixelFormatType(referenceImage);
     if (dstWidth == 0 || dstHeight == 0) {
         return [self copySampleBuffer:source withTimingFrom:reference];
     }
@@ -294,7 +303,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     CVReturn rv = CVPixelBufferCreate(kCFAllocatorDefault,
                                       dstWidth,
                                       dstHeight,
-                                      dstFormat,
+                                      kCVPixelFormatType_32BGRA,
                                       (__bridge CFDictionaryRef)attrs,
                                       &dstBuffer);
     if (rv != kCVReturnSuccess || !dstBuffer) {
