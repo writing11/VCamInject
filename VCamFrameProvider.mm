@@ -3,6 +3,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
 #import <CoreVideo/CoreVideo.h>
+#import <ImageIO/ImageIO.h>
 #import <sys/stat.h>
 
 static NSString * const kVCamFramePath = @"/var/mobile/Library/VCam/frame.bgra";
@@ -20,6 +21,9 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) NSURL *selectedVideoURL;
 @property (nonatomic, strong) NSURL *activeVideoURL;
 @property (nonatomic, strong) CIContext *ciContext;
+@property (nonatomic, assign) CGAffineTransform videoPreferredTransform;
+@property (nonatomic, strong) NSData *lastJPEGData;
+@property (nonatomic, assign) NSTimeInterval lastJPEGTime;
 @property (nonatomic, assign) NSTimeInterval activationTime;
 @property (nonatomic, assign) BOOL disabledInProcess;
 @end
@@ -260,6 +264,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     self.activeVideoURL = url;
     self.activeVideoPath = url.path;
     self.activeVideoMTime = 0;
+    self.videoPreferredTransform = track.preferredTransform;
 }
 
 - (nullable CMSampleBufferRef)copySampleBuffer:(CMSampleBufferRef)source withTimingFrom:(CMSampleBufferRef)reference {
@@ -310,7 +315,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return nil;
     }
 
-    CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    CIImage *image = [self displayImageFromSourceImage:sourceImage];
     CGRect src = image.extent;
     CGFloat scale = MAX((CGFloat)dstWidth / CGRectGetWidth(src), (CGFloat)dstHeight / CGRectGetHeight(src));
     CGFloat scaledWidth = CGRectGetWidth(src) * scale;
@@ -377,7 +382,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return reference;
     }
 
-    CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    CIImage *image = [self displayImageFromSourceImage:sourceImage];
     CGRect src = image.extent;
     if (CGRectIsEmpty(src)) {
         CFRetain(reference);
@@ -404,6 +409,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:scaled colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -411,6 +417,41 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
     CFRetain(reference);
     return reference;
+}
+
+- (CIImage *)displayImageFromSourceImage:(CVImageBufferRef)sourceImage {
+    CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    CGAffineTransform preferred = self.videoPreferredTransform;
+    if (!CGAffineTransformIsIdentity(preferred)) {
+        image = [image imageByApplyingTransform:preferred];
+        CGRect extent = image.extent;
+        image = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
+    }
+    return image;
+}
+
+- (void)updateLatestJPEGFromImage:(CIImage *)image colorSpace:(CGColorSpaceRef)colorSpace {
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (now - self.lastJPEGTime < 0.25) {
+        return;
+    }
+
+    NSData *jpeg = [[self sharedCIContext] JPEGRepresentationOfImage:image
+                                                          colorSpace:colorSpace
+                                                             options:@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.9}];
+    if (jpeg.length > 0) {
+        self.lastJPEGData = jpeg;
+        self.lastJPEGTime = now;
+    }
+}
+
+- (nullable NSData *)latestJPEGData {
+    @synchronized (self) {
+        if (![self isVirtualCameraEnabled]) {
+            return nil;
+        }
+        return self.lastJPEGData;
+    }
 }
 
 - (CIContext *)sharedCIContext {

@@ -1,4 +1,5 @@
 #import <AVFoundation/AVFoundation.h>
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -60,6 +61,40 @@ static const void *kVCamProxyKey = &kVCamProxyKey;
     proxy.originalDelegate = sampleBufferDelegate;
     objc_setAssociatedObject(self, kVCamProxyKey, proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     %orig((id<AVCaptureVideoDataOutputSampleBufferDelegate>)proxy, sampleBufferCallbackQueue);
+}
+
+%end
+
+%hook AVCapturePhoto
+
+- (NSData *)fileDataRepresentation {
+    NSData *jpeg = [[VCamFrameProvider sharedProvider] latestJPEGData];
+    if (jpeg.length > 0) {
+        return jpeg;
+    }
+    return %orig;
+}
+
+- (CGImageRef)CGImageRepresentation {
+    NSData *jpeg = [[VCamFrameProvider sharedProvider] latestJPEGData];
+    if (jpeg.length > 0) {
+        UIImage *image = [UIImage imageWithData:jpeg];
+        if (image.CGImage) {
+            return CGImageRetain(image.CGImage);
+        }
+    }
+    return %orig;
+}
+
+- (CGImageRef)previewCGImageRepresentation {
+    NSData *jpeg = [[VCamFrameProvider sharedProvider] latestJPEGData];
+    if (jpeg.length > 0) {
+        UIImage *image = [UIImage imageWithData:jpeg];
+        if (image.CGImage) {
+            return CGImageRetain(image.CGImage);
+        }
+    }
+    return %orig;
 }
 
 %end
