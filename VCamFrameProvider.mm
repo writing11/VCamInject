@@ -24,6 +24,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) CIContext *ciContext;
 @property (nonatomic, assign) CGAffineTransform videoPreferredTransform;
 @property (nonatomic, strong) NSData *lastJPEGData;
+@property (nonatomic, strong) CIImage *lastPhotoImage;
 @property (nonatomic, assign) NSTimeInterval lastJPEGTime;
 @property (nonatomic, assign) NSTimeInterval activationTime;
 @property (nonatomic, assign) NSInteger manualRotationQuarterTurns;
@@ -468,6 +469,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
                                                              options:@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.9}];
     if (jpeg.length > 0) {
         self.lastJPEGData = jpeg;
+        self.lastPhotoImage = normalized;
         self.lastJPEGTime = now;
     }
 }
@@ -479,6 +481,69 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         }
         return self.lastJPEGData;
     }
+}
+
+- (nullable NSData *)latestJPEGDataMatchingPhotoData:(NSData *)photoData {
+    @synchronized (self) {
+        if (![self isVirtualCameraEnabled] || !self.lastPhotoImage) {
+            return nil;
+        }
+
+        CGSize size = [self pixelSizeFromImageData:photoData];
+        if (size.width <= 0 || size.height <= 0) {
+            return self.lastJPEGData;
+        }
+
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+        NSData *jpeg = [self JPEGFromImage:self.lastPhotoImage
+                                     width:(size_t)size.width
+                                    height:(size_t)size.height
+                                colorSpace:colorSpace];
+        if (colorSpace) {
+            CGColorSpaceRelease(colorSpace);
+        }
+        return jpeg ?: self.lastJPEGData;
+    }
+}
+
+- (CGSize)pixelSizeFromImageData:(NSData *)data {
+    if (data.length == 0) {
+        return CGSizeZero;
+    }
+
+    CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+    if (!source) {
+        return CGSizeZero;
+    }
+
+    NSDictionary *props = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, NULL));
+    CFRelease(source);
+    NSNumber *width = props[(NSString *)kCGImagePropertyPixelWidth];
+    NSNumber *height = props[(NSString *)kCGImagePropertyPixelHeight];
+    return CGSizeMake(width.doubleValue, height.doubleValue);
+}
+
+- (nullable NSData *)JPEGFromImage:(CIImage *)image width:(size_t)width height:(size_t)height colorSpace:(CGColorSpaceRef)colorSpace {
+    if (!image || width == 0 || height == 0) {
+        return nil;
+    }
+
+    CGRect src = image.extent;
+    if (CGRectIsEmpty(src)) {
+        return nil;
+    }
+
+    CGFloat scale = MAX((CGFloat)width / CGRectGetWidth(src), (CGFloat)height / CGRectGetHeight(src));
+    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
+    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
+    CGFloat tx = ((CGFloat)width - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
+    CGFloat ty = ((CGFloat)height - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
+    CIImage *scaled = [image imageByApplyingTransform:CGAffineTransformMake(scale, 0, 0, scale, tx, ty)];
+    CIImage *cropped = [scaled imageByCroppingToRect:CGRectMake(0, 0, width, height)];
+
+    return [[self sharedCIContext] JPEGRepresentationOfImage:cropped
+                                                  colorSpace:colorSpace
+                                                     options:@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.92}];
 }
 
 - (CIContext *)sharedCIContext {

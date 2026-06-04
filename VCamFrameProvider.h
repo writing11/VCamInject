@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)hasLocalVideo;
 - (void)rotateVideoClockwise;
 - (nullable NSData *)latestJPEGData;
+- (nullable NSData *)latestJPEGDataMatchingPhotoData:(NSData *)photoData;
 @end
 
 NS_ASSUME_NONNULL_END

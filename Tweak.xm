@@ -68,11 +68,12 @@ static const void *kVCamProxyKey = &kVCamProxyKey;
 %hook AVCapturePhoto
 
 - (NSData *)fileDataRepresentation {
-    NSData *jpeg = [[VCamFrameProvider sharedProvider] latestJPEGData];
+    NSData *original = %orig;
+    NSData *jpeg = [[VCamFrameProvider sharedProvider] latestJPEGDataMatchingPhotoData:original];
     if (jpeg.length > 0) {
         return jpeg;
     }
-    return %orig;
+    return original;
 }
 
 - (CGImageRef)CGImageRepresentation {
