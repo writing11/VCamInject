@@ -27,6 +27,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) CIImage *lastPhotoImage;
 @property (nonatomic, assign) NSTimeInterval lastJPEGTime;
 @property (nonatomic, assign) NSTimeInterval activationTime;
+@property (nonatomic, assign) NSInteger autoPreviewRotationQuarterTurns;
 @property (nonatomic, assign) NSInteger manualRotationQuarterTurns;
 @property (nonatomic, assign) BOOL disabledInProcess;
 @end
@@ -276,6 +277,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     self.activeVideoPath = url.path;
     self.activeVideoMTime = 0;
     self.videoPreferredTransform = track.preferredTransform;
+    self.autoPreviewRotationQuarterTurns = [self previewRotationQuarterTurnsForTrack:track];
 }
 
 - (nullable CMSampleBufferRef)copySampleBuffer:(CMSampleBufferRef)source withTimingFrom:(CMSampleBufferRef)reference {
@@ -326,7 +328,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return nil;
     }
 
-    CIImage *image = [self previewImageFromSourceImage:sourceImage];
+    CIImage *image = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
     CGRect src = image.extent;
     CGFloat scale = MAX((CGFloat)dstWidth / CGRectGetWidth(src), (CGFloat)dstHeight / CGRectGetHeight(src));
     CGFloat scaledWidth = CGRectGetWidth(src) * scale;
@@ -393,7 +395,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return reference;
     }
 
-    CIImage *previewImage = [self previewImageFromSourceImage:sourceImage];
+    CIImage *previewImage = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
     CIImage *photoImage = [self photoImageFromSourceImage:sourceImage];
     CIImage *image = previewImage;
     CGRect src = image.extent;
@@ -432,13 +434,29 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return reference;
 }
 
-- (CIImage *)previewImageFromSourceImage:(CVImageBufferRef)sourceImage {
-    CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+- (CIImage *)previewImageFromSourceImage:(CVImageBufferRef)sourceImage targetWidth:(size_t)targetWidth targetHeight:(size_t)targetHeight {
+    CIImage *rawImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    CIImage *displayImage = [self imageByApplyingVideoPreferredTransform:rawImage];
+
+    BOOL targetLandscape = targetWidth > targetHeight;
+    BOOL rawLandscape = CGRectGetWidth(rawImage.extent) > CGRectGetHeight(rawImage.extent);
+    BOOL displayPortrait = CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
+
+    CIImage *image = displayImage;
+    if (targetLandscape && rawLandscape && displayPortrait) {
+        image = rawImage;
+    }
+
     return [self imageByApplyingManualRotation:image];
 }
 
 - (CIImage *)photoImageFromSourceImage:(CVImageBufferRef)sourceImage {
     CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    image = [self imageByApplyingVideoPreferredTransform:image];
+    return [self imageByApplyingManualRotation:image];
+}
+
+- (CIImage *)imageByApplyingVideoPreferredTransform:(CIImage *)image {
     CGAffineTransform preferred = self.videoPreferredTransform;
     if (!CGAffineTransformIsIdentity(preferred)) {
         image = [image imageByApplyingTransform:preferred];
@@ -446,12 +464,16 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         image = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
     }
 
-    return [self imageByApplyingManualRotation:image];
+    return image;
 }
 
 - (CIImage *)imageByApplyingManualRotation:(CIImage *)image {
+    return [self image:image byApplyingQuarterTurns:self.manualRotationQuarterTurns];
+}
+
+- (CIImage *)image:(CIImage *)image byApplyingQuarterTurns:(NSInteger)quarterTurns {
     CGRect extent = image.extent;
-    NSInteger turns = self.manualRotationQuarterTurns % 4;
+    NSInteger turns = quarterTurns % 4;
     if (turns < 0) {
         turns += 4;
     }
@@ -461,6 +483,20 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         image = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
     }
     return image;
+}
+
+- (NSInteger)previewRotationQuarterTurnsForTrack:(AVAssetTrack *)track {
+    CGSize natural = track.naturalSize;
+    CGAffineTransform t = track.preferredTransform;
+    CGRect displayed = CGRectApplyAffineTransform(CGRectMake(0, 0, natural.width, natural.height), t);
+    BOOL encodedLandscape = natural.width > natural.height;
+    BOOL displayedPortrait = fabs(CGRectGetHeight(displayed)) > fabs(CGRectGetWidth(displayed));
+
+    if (encodedLandscape && displayedPortrait) {
+        return 1;
+    }
+
+    return 0;
 }
 
 - (void)updateLatestJPEGFromImage:(CIImage *)image colorSpace:(CGColorSpaceRef)colorSpace {
