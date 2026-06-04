@@ -16,3 +16,9 @@ vcamreceiverd_CFLAGS = -Wall -Wextra -O2
 vcamreceiverd_INSTALL_PATH = /usr/local/bin
 
 include $(THEOS_MAKE_PATH)/tool.mk
+
+before-package::
+	mkdir -p $(THEOS_STAGING_DIR)/DEBIAN
+	cp postinst $(THEOS_STAGING_DIR)/DEBIAN/postinst
+	cp prerm $(THEOS_STAGING_DIR)/DEBIAN/prerm
+	chmod 0755 $(THEOS_STAGING_DIR)/DEBIAN/postinst $(THEOS_STAGING_DIR)/DEBIAN/prerm

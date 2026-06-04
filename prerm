@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+launchctl bootout system /var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
+launchctl bootout system /Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
+
+exit 0

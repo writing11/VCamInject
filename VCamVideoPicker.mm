@@ -1,4 +1,5 @@
 #import "VCamVideoPicker.h"
+#import "VCamFrameProvider.h"
 
 static NSString * const kVCamDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamMP4Path = @"/var/mobile/Library/VCam/source.mp4";
@@ -71,14 +72,14 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         [alert addAction:[UIAlertAction actionWithTitle:@"启用视频替换"
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(__unused UIAlertAction *action) {
-            [self enableVirtualCamera];
+            [[VCamFrameProvider sharedProvider] enableVirtualCamera];
             [self showMessage:@"已启用视频替换" from:top];
         }]];
 
         [alert addAction:[UIAlertAction actionWithTitle:@"恢复原相机"
                                                   style:UIAlertActionStyleDestructive
                                                 handler:^(__unused UIAlertAction *action) {
-            [self disableVirtualCamera];
+            [[VCamFrameProvider sharedProvider] disableVirtualCamera];
             [self showMessage:@"已恢复原相机" from:top];
         }]];
 
@@ -138,6 +139,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info {
     NSURL *mediaURL = info[UIImagePickerControllerMediaURL];
     if (mediaURL) {
+        [[VCamFrameProvider sharedProvider] setLocalVideoURL:mediaURL];
         [self installVideoAtURL:mediaURL];
     }
 
@@ -157,7 +159,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 - (void)installVideoAtURL:(NSURL *)url {
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm createDirectoryAtPath:kVCamDir withIntermediateDirectories:YES attributes:nil error:nil];
-    [self enableVirtualCamera];
 
     [fm removeItemAtPath:kVCamMP4Path error:nil];
     [fm removeItemAtPath:kVCamMOVPath error:nil];
@@ -178,18 +179,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
             [data writeToFile:target atomically:YES];
         }
     }
-}
-
-- (void)enableVirtualCamera {
-    NSFileManager *fm = NSFileManager.defaultManager;
-    [fm createDirectoryAtPath:kVCamDir withIntermediateDirectories:YES attributes:nil error:nil];
-    [fm removeItemAtPath:kVCamDisabledPath error:nil];
-}
-
-- (void)disableVirtualCamera {
-    NSFileManager *fm = NSFileManager.defaultManager;
-    [fm createDirectoryAtPath:kVCamDir withIntermediateDirectories:YES attributes:nil error:nil];
-    [@"disabled" writeToFile:kVCamDisabledPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 - (void)showMessage:(NSString *)message from:(UIViewController *)controller {

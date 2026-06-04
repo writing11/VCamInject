@@ -82,6 +82,31 @@ source.mp4/source.mov/source.m4v 本地视频
 
 之后插件会退回真实相机。点“启用视频替换”会删除这个禁用标记。
 
+最终版行为：
+
+```text
+选择相册视频后，当前 App 进程内直接读取该视频做替换
+不再依赖把视频写入 /var/mobile/Library/VCam/source.mp4
+恢复原相机会立刻禁用替换
+重新选择视频会自动启用替换
+```
+
+电脑端：
+
+```text
+vcamreceiverd 会随 deb 安装自动加载
+监听 iPhone 9999 端口
+Windows 端 usbmuxd 连接后会通过握手
+```
+
+如果 Windows 仍提示插件未监听，手机终端检查：
+
+```sh
+ps -A | grep vcamreceiver
+cat /var/mobile/Library/VCam/vcamreceiver.log
+cat /var/mobile/Library/VCam/vcamreceiver.err
+```
+
 ## 它现在为什么不是 deb
 
 这个文件夹是 Theos 工程源码。注入 tweak 需要先编译，编译后才会在 `packages/` 目录生成 `.deb`。

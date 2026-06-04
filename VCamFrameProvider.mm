@@ -16,6 +16,9 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) AVAssetReaderTrackOutput *videoOutput;
 @property (nonatomic, copy) NSString *activeVideoPath;
 @property (nonatomic) time_t activeVideoMTime;
+@property (nonatomic, strong) NSURL *selectedVideoURL;
+@property (nonatomic, strong) NSURL *activeVideoURL;
+@property (nonatomic, assign) BOOL disabledInProcess;
 @end
 
 @implementation VCamFrameProvider
@@ -30,7 +33,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 }
 
 - (nullable CMSampleBufferRef)copyVirtualSampleBufferLike:(CMSampleBufferRef)sampleBuffer {
-    if ([NSFileManager.defaultManager fileExistsAtPath:kVCamDisabledPath]) {
+    if (![self isVirtualCameraEnabled]) {
         [self resetLocalVideoReader];
         return nil;
     }
@@ -109,32 +112,25 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 }
 
 - (nullable CMSampleBufferRef)copyLocalVideoSampleBufferLike:(CMSampleBufferRef)sampleBuffer {
-    NSString *path = [self firstExistingVideoPath];
-    if (!path) {
-        [self resetLocalVideoReader];
-        return nil;
-    }
-
-    struct stat st;
-    if (stat(path.fileSystemRepresentation, &st) != 0) {
+    NSURL *url = [self currentVideoURL];
+    if (!url) {
         [self resetLocalVideoReader];
         return nil;
     }
 
     BOOL needsReload = !self.assetReader ||
-                       ![self.activeVideoPath isEqualToString:path] ||
-                       self.activeVideoMTime != st.st_mtime ||
+                       ![self.activeVideoURL isEqual:url] ||
                        self.assetReader.status == AVAssetReaderStatusFailed ||
                        self.assetReader.status == AVAssetReaderStatusCancelled ||
                        self.assetReader.status == AVAssetReaderStatusCompleted;
 
     if (needsReload) {
-        [self configureLocalVideoReaderAtPath:path mtime:st.st_mtime];
+        [self configureLocalVideoReaderAtURL:url];
     }
 
     CMSampleBufferRef next = [self.videoOutput copyNextSampleBuffer];
     if (!next) {
-        [self configureLocalVideoReaderAtPath:path mtime:st.st_mtime];
+        [self configureLocalVideoReaderAtURL:url];
         next = [self.videoOutput copyNextSampleBuffer];
     }
 
@@ -145,6 +141,45 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     CMSampleBufferRef retimed = [self copySampleBuffer:next withTimingFrom:sampleBuffer];
     CFRelease(next);
     return retimed;
+}
+
+- (void)setLocalVideoURL:(NSURL *)url {
+    self.selectedVideoURL = url;
+    self.disabledInProcess = NO;
+    [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
+    [self resetLocalVideoReader];
+}
+
+- (void)enableVirtualCamera {
+    self.disabledInProcess = NO;
+    [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
+}
+
+- (void)disableVirtualCamera {
+    self.disabledInProcess = YES;
+    [self resetLocalVideoReader];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
+    [@"disabled" writeToFile:kVCamDisabledPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+- (BOOL)isVirtualCameraEnabled {
+    if (self.disabledInProcess) {
+        return NO;
+    }
+    return ![NSFileManager.defaultManager fileExistsAtPath:kVCamDisabledPath];
+}
+
+- (nullable NSURL *)currentVideoURL {
+    if (self.selectedVideoURL) {
+        return self.selectedVideoURL;
+    }
+
+    NSString *path = [self firstExistingVideoPath];
+    if (!path) {
+        return nil;
+    }
+    return [NSURL fileURLWithPath:path];
 }
 
 - (nullable NSString *)firstExistingVideoPath {
@@ -164,14 +199,15 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     self.videoOutput = nil;
     self.activeVideoPath = nil;
     self.activeVideoMTime = 0;
+    self.activeVideoURL = nil;
 }
 
-- (void)configureLocalVideoReaderAtPath:(NSString *)path mtime:(time_t)mtime {
+- (void)configureLocalVideoReaderAtURL:(NSURL *)url {
     [self.assetReader cancelReading];
     self.assetReader = nil;
     self.videoOutput = nil;
+    self.activeVideoURL = nil;
 
-    NSURL *url = [NSURL fileURLWithPath:path];
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:url options:nil];
     AVAssetTrack *track = [[asset tracksWithMediaType:AVMediaTypeVideo] firstObject];
     if (!track) {
@@ -201,8 +237,9 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
     self.assetReader = reader;
     self.videoOutput = output;
-    self.activeVideoPath = path;
-    self.activeVideoMTime = mtime;
+    self.activeVideoURL = url;
+    self.activeVideoPath = url.path;
+    self.activeVideoMTime = 0;
 }
 
 - (nullable CMSampleBufferRef)copySampleBuffer:(CMSampleBufferRef)source withTimingFrom:(CMSampleBufferRef)reference {
