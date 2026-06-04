@@ -21,7 +21,11 @@ jobs:
 
       - name: Install Theos
         run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos)"
+          git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+          rm -rf "$HOME/theos/sdks"
+          git clone --depth 1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
+          test -d "$HOME/theos"
+          test -d "$HOME/theos/sdks/iPhoneOS16.5.sdk"
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
 
       - name: Build RootHide package
