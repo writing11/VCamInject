@@ -8,7 +8,7 @@ VCamInject_FILES = Tweak.xm VCamFrameProvider.mm VCamVideoPicker.mm
 VCamInject_CFLAGS = -fobjc-arc -Wall -Wextra
 VCamInject_CCFLAGS = -std=gnu++14
 VCamInject_CXXFLAGS = -std=gnu++14
-VCamInject_FRAMEWORKS = AVFoundation CoreMedia CoreVideo UIKit PhotosUI
+VCamInject_FRAMEWORKS = AVFoundation CoreMedia CoreVideo CoreImage UIKit PhotosUI
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

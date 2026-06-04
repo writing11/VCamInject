@@ -1,6 +1,7 @@
 #import "VCamFrameProvider.h"
 
 #import <AVFoundation/AVFoundation.h>
+#import <CoreImage/CoreImage.h>
 #import <CoreVideo/CoreVideo.h>
 #import <sys/stat.h>
 
@@ -18,6 +19,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic) time_t activeVideoMTime;
 @property (nonatomic, strong) NSURL *selectedVideoURL;
 @property (nonatomic, strong) NSURL *activeVideoURL;
+@property (nonatomic, strong) CIContext *ciContext;
 @property (nonatomic, assign) BOOL disabledInProcess;
 @end
 
@@ -138,7 +140,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return nil;
     }
 
-    CMSampleBufferRef retimed = [self copySampleBuffer:next withTimingFrom:sampleBuffer];
+    CMSampleBufferRef retimed = [self copyScaledVideoSampleBuffer:next like:sampleBuffer];
     CFRelease(next);
     return retimed;
 }
@@ -258,6 +260,95 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
     CFRetain(source);
     return source;
+}
+
+- (nullable CMSampleBufferRef)copyScaledVideoSampleBuffer:(CMSampleBufferRef)source like:(CMSampleBufferRef)reference {
+    CVImageBufferRef sourceImage = CMSampleBufferGetImageBuffer(source);
+    CVImageBufferRef referenceImage = CMSampleBufferGetImageBuffer(reference);
+    if (!sourceImage || !referenceImage) {
+        return [self copySampleBuffer:source withTimingFrom:reference];
+    }
+
+    size_t dstWidth = CVPixelBufferGetWidth(referenceImage);
+    size_t dstHeight = CVPixelBufferGetHeight(referenceImage);
+    if (dstWidth == 0 || dstHeight == 0) {
+        return [self copySampleBuffer:source withTimingFrom:reference];
+    }
+
+    NSDictionary *attrs = @{
+        (NSString *)kCVPixelBufferIOSurfacePropertiesKey: @{},
+        (NSString *)kCVPixelBufferCGImageCompatibilityKey: @YES,
+        (NSString *)kCVPixelBufferCGBitmapContextCompatibilityKey: @YES
+    };
+
+    CVPixelBufferRef dstBuffer = NULL;
+    CVReturn rv = CVPixelBufferCreate(kCFAllocatorDefault,
+                                      dstWidth,
+                                      dstHeight,
+                                      kCVPixelFormatType_32BGRA,
+                                      (__bridge CFDictionaryRef)attrs,
+                                      &dstBuffer);
+    if (rv != kCVReturnSuccess || !dstBuffer) {
+        return nil;
+    }
+
+    CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    CGRect src = image.extent;
+    CGFloat scale = MAX((CGFloat)dstWidth / CGRectGetWidth(src), (CGFloat)dstHeight / CGRectGetHeight(src));
+    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
+    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
+    CGFloat tx = ((CGFloat)dstWidth - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
+    CGFloat ty = ((CGFloat)dstHeight - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
+    CGAffineTransform transform = CGAffineTransformMake(scale, 0, 0, scale, tx, ty);
+    CIImage *scaled = [image imageByApplyingTransform:transform];
+
+    CIContext *context = [self sharedCIContext];
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    [context render:scaled
+      toCVPixelBuffer:dstBuffer
+               bounds:CGRectMake(0, 0, dstWidth, dstHeight)
+           colorSpace:colorSpace];
+    if (colorSpace) {
+        CGColorSpaceRelease(colorSpace);
+    }
+
+    CMVideoFormatDescriptionRef format = NULL;
+    OSStatus status = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, dstBuffer, &format);
+    if (status != noErr || !format) {
+        CVPixelBufferRelease(dstBuffer);
+        return nil;
+    }
+
+    CMSampleTimingInfo timing;
+    status = CMSampleBufferGetSampleTimingInfo(reference, 0, &timing);
+    if (status != noErr) {
+        timing.duration = CMTimeMake(1, 30);
+        timing.presentationTimeStamp = CMClockGetTime(CMClockGetHostTimeClock());
+        timing.decodeTimeStamp = kCMTimeInvalid;
+    }
+
+    CMSampleBufferRef outBuffer = NULL;
+    status = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
+                                                      dstBuffer,
+                                                      format,
+                                                      &timing,
+                                                      &outBuffer);
+
+    CFRelease(format);
+    CVPixelBufferRelease(dstBuffer);
+
+    if (status != noErr || !outBuffer) {
+        return nil;
+    }
+
+    return outBuffer;
+}
+
+- (CIContext *)sharedCIContext {
+    if (!self.ciContext) {
+        self.ciContext = [CIContext contextWithOptions:nil];
+    }
+    return self.ciContext;
 }
 
 - (CGSize)sizeFromSampleBuffer:(CMSampleBufferRef)sampleBuffer {

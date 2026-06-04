@@ -42,13 +42,13 @@
     }
 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.frame = CGRectMake(MAX(12, window.bounds.size.width - 88), 120, 72, 40);
+    button.frame = CGRectMake(MAX(12, window.bounds.size.width - 112), 120, 96, 40);
     button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
     button.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.78];
     button.layer.cornerRadius = 20;
     button.layer.masksToBounds = YES;
     button.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-    [button setTitle:@"VCam" forState:UIControlStateNormal];
+    [button setTitle:@"虚拟相机" forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [button addTarget:self action:@selector(controlButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -89,23 +89,23 @@
     }
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
-                                                                   message:@"Camera replacement"
+                                                                   message:@"虚拟相机控制"
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Choose video and replace"
+    [alert addAction:[UIAlertAction actionWithTitle:@"选择视频并替换"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
         [self presentPhotoPickerFromWindow:window];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Restore real camera"
+    [alert addAction:[UIAlertAction actionWithTitle:@"恢复原相机"
                                               style:UIAlertActionStyleDestructive
                                             handler:^(__unused UIAlertAction *action) {
         [[VCamFrameProvider sharedProvider] disableVirtualCamera];
-        [self showMessage:@"Real camera restored" from:top];
+        [self showMessage:@"已恢复原相机" from:top];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Hide VCam button"
+    [alert addAction:[UIAlertAction actionWithTitle:@"隐藏悬浮按钮"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
         [self.controlButton removeFromSuperview];
@@ -113,7 +113,7 @@
         self.controlWindow = nil;
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消"
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
 
@@ -149,7 +149,7 @@
         self.presentingController = top;
         [top presentViewController:picker animated:YES completion:nil];
     } else {
-        [self showMessage:@"iOS 14 or newer is required" from:top];
+        [self showMessage:@"需要 iOS 14 或更新版本" from:top];
     }
 }
 
@@ -210,7 +210,7 @@
     NSItemProvider *provider = result.itemProvider;
     NSString *typeIdentifier = [self firstSupportedVideoTypeFromProvider:provider];
     if (!typeIdentifier) {
-        [self showMessage:@"No video selected" from:self.presentingController];
+        [self showMessage:@"没有选择视频" from:self.presentingController];
         self.presentingController = nil;
         return;
     }
@@ -218,7 +218,7 @@
     [provider loadFileRepresentationForTypeIdentifier:typeIdentifier completionHandler:^(NSURL *url, NSError *error) {
         if (!url || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self showMessage:@"Failed to read video" from:self.presentingController];
+                [self showMessage:@"读取视频失败" from:self.presentingController];
                 self.presentingController = nil;
             });
             return;
@@ -228,9 +228,9 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             if (stableURL) {
                 [[VCamFrameProvider sharedProvider] setLocalVideoURL:stableURL];
-                [self showMessage:@"Video selected. Replacement enabled." from:self.presentingController];
+                [self showMessage:@"已选择视频，开始替换" from:self.presentingController];
             } else {
-                [self showMessage:@"Failed to copy video" from:self.presentingController];
+                [self showMessage:@"复制视频失败" from:self.presentingController];
             }
             self.presentingController = nil;
         });
