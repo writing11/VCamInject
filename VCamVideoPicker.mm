@@ -1,7 +1,5 @@
 #import "VCamVideoPicker.h"
 
-#import <MobileCoreServices/MobileCoreServices.h>
-
 static NSString * const kVCamDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamMP4Path = @"/var/mobile/Library/VCam/source.mp4";
 static NSString * const kVCamMOVPath = @"/var/mobile/Library/VCam/source.mov";
@@ -29,7 +27,7 @@ static NSString * const kVCamM4VPath = @"/var/mobile/Library/VCam/source.m4v";
             return;
         }
 
-        UIViewController *root = window.rootViewController ?: UIApplication.sharedApplication.keyWindow.rootViewController;
+        UIViewController *root = window.rootViewController ?: [self activeRootViewController];
         UIViewController *top = [self topViewControllerFrom:root];
         if (!top || top.presentedViewController) {
             return;
@@ -41,7 +39,7 @@ static NSString * const kVCamM4VPath = @"/var/mobile/Library/VCam/source.m4v";
 
         UIImagePickerController *picker = [[UIImagePickerController alloc] init];
         picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
-        picker.mediaTypes = @[(__bridge NSString *)kUTTypeMovie];
+        picker.mediaTypes = @[@"public.movie"];
         picker.videoQuality = UIImagePickerControllerQualityTypeHigh;
         picker.delegate = self;
 
@@ -66,6 +64,27 @@ static NSString * const kVCamM4VPath = @"/var/mobile/Library/VCam/source.m4v";
     }
 
     return current;
+}
+
+- (UIViewController *)activeRootViewController {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) {
+            continue;
+        }
+
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        if (windowScene.activationState != UISceneActivationStateForegroundActive) {
+            continue;
+        }
+
+        for (UIWindow *candidate in windowScene.windows) {
+            if (candidate.rootViewController) {
+                return candidate.rootViewController;
+            }
+        }
+    }
+
+    return nil;
 }
 
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info {
