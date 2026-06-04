@@ -35,6 +35,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 }
 
 - (nullable CMSampleBufferRef)copyVirtualSampleBufferLike:(CMSampleBufferRef)sampleBuffer {
+    @synchronized (self) {
     if (![self isVirtualCameraEnabled]) {
         [self resetLocalVideoReader];
         return nil;
@@ -111,6 +112,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 
     return outBuffer;
+    }
 }
 
 - (nullable CMSampleBufferRef)copyLocalVideoSampleBufferLike:(CMSampleBufferRef)sampleBuffer {
@@ -146,23 +148,29 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 }
 
 - (void)setLocalVideoURL:(NSURL *)url {
+    @synchronized (self) {
     self.selectedVideoURL = url;
     self.disabledInProcess = NO;
     [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
     [self resetLocalVideoReader];
+    }
 }
 
 - (void)enableVirtualCamera {
+    @synchronized (self) {
     self.disabledInProcess = NO;
     [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
+    }
 }
 
 - (void)disableVirtualCamera {
+    @synchronized (self) {
     self.disabledInProcess = YES;
     [self resetLocalVideoReader];
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
     [@"disabled" writeToFile:kVCamDisabledPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
 }
 
 - (BOOL)isVirtualCameraEnabled {
@@ -271,6 +279,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
     size_t dstWidth = CVPixelBufferGetWidth(referenceImage);
     size_t dstHeight = CVPixelBufferGetHeight(referenceImage);
+    OSType dstFormat = CVPixelBufferGetPixelFormatType(referenceImage);
     if (dstWidth == 0 || dstHeight == 0) {
         return [self copySampleBuffer:source withTimingFrom:reference];
     }
@@ -285,7 +294,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     CVReturn rv = CVPixelBufferCreate(kCFAllocatorDefault,
                                       dstWidth,
                                       dstHeight,
-                                      kCVPixelFormatType_32BGRA,
+                                      dstFormat,
                                       (__bridge CFDictionaryRef)attrs,
                                       &dstBuffer);
     if (rv != kCVReturnSuccess || !dstBuffer) {

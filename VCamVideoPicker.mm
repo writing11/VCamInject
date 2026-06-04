@@ -228,7 +228,6 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             if (stableURL) {
                 [[VCamFrameProvider sharedProvider] setLocalVideoURL:stableURL];
-                [self showMessage:@"已选择视频，开始替换" from:self.presentingController];
             } else {
                 [self showMessage:@"复制视频失败" from:self.presentingController];
             }
