@@ -419,7 +419,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:scaled colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:image colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -457,7 +457,13 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return;
     }
 
-    NSData *jpeg = [[self sharedCIContext] JPEGRepresentationOfImage:image
+    CGRect extent = image.extent;
+    if (CGRectIsEmpty(extent)) {
+        return;
+    }
+    CIImage *normalized = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
+
+    NSData *jpeg = [[self sharedCIContext] JPEGRepresentationOfImage:normalized
                                                           colorSpace:colorSpace
                                                              options:@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.9}];
     if (jpeg.length > 0) {
