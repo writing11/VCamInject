@@ -6,7 +6,7 @@ RootHide/rootless iOS camera replacement tweak.
 
 - Injects into apps that use `AVCaptureVideoDataOutput`.
 - Replaces camera sample buffers with a selected video.
-- Two-finger quick double tap shows or hides a small floating `VCam` button.
+- Two-finger quick double tap shows or hides a small floating red `Y` button.
 - Tap the floating button to open the control menu.
 - `Choose video and replace` opens the iOS photo video picker and enables replacement immediately after selection.
 - `Restore real camera` disables replacement and returns the app to the real camera.
@@ -17,7 +17,7 @@ RootHide/rootless iOS camera replacement tweak.
 
 1. Open the target app camera page.
 2. Tap the screen twice quickly with two fingers.
-3. A floating `VCam` button appears.
+3. A floating red `Y` button appears.
 4. Tap `VCam`.
 5. Choose `Choose video and replace`.
 6. Pick a video from the phone album.
@@ -26,7 +26,7 @@ The selected video is copied into the app temporary directory and is used immedi
 
 To restore the real camera:
 
-1. Tap the floating `VCam` button.
+1. Tap the floating red `Y` button.
 2. Choose `Restore real camera`.
 
 ## Priority order

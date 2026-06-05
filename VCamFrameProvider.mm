@@ -546,7 +546,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         NSNumber *orientation = [self orientationFromImageData:photoData];
         CIImage *outputImage = [self image:self.lastPhotoImage byApplyingEXIFOrientation:orientation];
         CGSize size = [self outputPhotoSizeFromOriginalPhotoData:photoData
-                                                     orientation:orientation
                                                  prefersPortrait:self.lastPhotoPrefersPortrait
                                                    fallbackImage:outputImage];
         if (size.width <= 0 || size.height <= 0) {
@@ -584,16 +583,10 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return [oriented imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
 }
 
-- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData orientation:(nullable NSNumber *)orientation prefersPortrait:(BOOL)prefersPortrait fallbackImage:(CIImage *)image {
+- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData prefersPortrait:(BOOL)prefersPortrait fallbackImage:(CIImage *)image {
     CGSize original = [self pixelSizeFromImageData:photoData];
     if (original.width <= 0 || original.height <= 0) {
         return [self fallbackPhotoSizeForImage:image prefersPortrait:prefersPortrait];
-    }
-
-    NSInteger orientationValue = orientation.integerValue;
-    BOOL swapsDimensions = orientationValue == 5 || orientationValue == 6 || orientationValue == 7 || orientationValue == 8;
-    if (swapsDimensions) {
-        return CGSizeMake(original.height, original.width);
     }
 
     CGFloat shortSide = MIN(original.width, original.height);
