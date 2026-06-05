@@ -415,7 +415,8 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:previewImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
+    CIImage *photoOutputImage = [self photoOutputImageFromPreviewImage:previewImage prefersPortrait:photoPrefersPortrait];
+    [self updateLatestJPEGFromImage:photoOutputImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -435,6 +436,17 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 - (CIImage *)photoImageFromSourceImage:(CVImageBufferRef)sourceImage {
     CIImage *rawImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
     return [self imageByApplyingVideoPreferredTransform:rawImage];
+}
+
+- (CIImage *)photoOutputImageFromPreviewImage:(CIImage *)image prefersPortrait:(BOOL)prefersPortrait {
+    BOOL imageLandscape = CGRectGetWidth(image.extent) > CGRectGetHeight(image.extent);
+    if (prefersPortrait && imageLandscape) {
+        return [self image:image byApplyingQuarterTurns:-1];
+    }
+    if (!prefersPortrait && !imageLandscape) {
+        return [self image:image byApplyingQuarterTurns:1];
+    }
+    return image;
 }
 
 - (CIImage *)imageByApplyingVideoPreferredTransform:(CIImage *)image {
