@@ -23,6 +23,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) NSURL *activeVideoURL;
 @property (nonatomic, strong) CIContext *ciContext;
 @property (nonatomic, assign) CGAffineTransform videoPreferredTransform;
+@property (nonatomic, assign) BOOL sourceVideoPrefersPortrait;
 @property (nonatomic, strong) NSData *lastJPEGData;
 @property (nonatomic, strong) CIImage *lastPhotoImage;
 @property (nonatomic, assign) NSTimeInterval lastJPEGTime;
@@ -227,6 +228,8 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     self.activeVideoPath = nil;
     self.activeVideoMTime = 0;
     self.activeVideoURL = nil;
+    self.videoPreferredTransform = CGAffineTransformIdentity;
+    self.sourceVideoPrefersPortrait = NO;
 }
 
 - (void)configureLocalVideoReaderAtURL:(NSURL *)url {
@@ -268,6 +271,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     self.activeVideoPath = url.path;
     self.activeVideoMTime = 0;
     self.videoPreferredTransform = track.preferredTransform;
+    self.sourceVideoPrefersPortrait = [self trackPrefersPortrait:track];
 }
 
 - (nullable CMSampleBufferRef)copySampleBuffer:(CMSampleBufferRef)source withTimingFrom:(CMSampleBufferRef)reference {
@@ -387,7 +391,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
     CIImage *previewImage = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
     CIImage *displayImage = [self photoImageFromSourceImage:sourceImage];
-    BOOL photoPrefersPortrait = CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
+    BOOL photoPrefersPortrait = self.sourceVideoPrefersPortrait || CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
     CIImage *image = previewImage;
     CGRect src = image.extent;
     if (CGRectIsEmpty(src)) {
@@ -441,12 +445,34 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 - (CIImage *)photoOutputImageFromPreviewImage:(CIImage *)image prefersPortrait:(BOOL)prefersPortrait {
     BOOL imageLandscape = CGRectGetWidth(image.extent) > CGRectGetHeight(image.extent);
     if (prefersPortrait && imageLandscape) {
-        return [self image:image byApplyingQuarterTurns:-1];
-    }
-    if (!prefersPortrait && !imageLandscape) {
         return [self image:image byApplyingQuarterTurns:1];
     }
+    if (!prefersPortrait && !imageLandscape) {
+        return [self image:image byApplyingQuarterTurns:-1];
+    }
     return image;
+}
+
+- (BOOL)trackPrefersPortrait:(AVAssetTrack *)track {
+    CGSize natural = track.naturalSize;
+    if (natural.width <= 0 || natural.height <= 0) {
+        return NO;
+    }
+
+    CGAffineTransform t = track.preferredTransform;
+    CGRect displayed = CGRectApplyAffineTransform(CGRectMake(0, 0, natural.width, natural.height), t);
+    CGFloat displayWidth = fabs(CGRectGetWidth(displayed));
+    CGFloat displayHeight = fabs(CGRectGetHeight(displayed));
+    if (displayWidth > 0 && displayHeight > 0) {
+        return displayHeight > displayWidth;
+    }
+
+    BOOL transformRotatesQuarterTurn = fabs(t.b) > fabs(t.a) || fabs(t.c) > fabs(t.d);
+    if (transformRotatesQuarterTurn) {
+        return natural.width > natural.height;
+    }
+
+    return natural.height > natural.width;
 }
 
 - (CIImage *)imageByApplyingVideoPreferredTransform:(CIImage *)image {
