@@ -77,7 +77,7 @@ static const void *kVCamProxyKey = &kVCamProxyKey;
 }
 
 - (CGImageRef)CGImageRepresentation {
-    NSData *jpeg = [[VCamFrameProvider sharedProvider] latestJPEGData];
+    NSData *jpeg = [self fileDataRepresentation];
     if (jpeg.length > 0) {
         UIImage *image = [UIImage imageWithData:jpeg];
         if (image.CGImage) {
@@ -88,7 +88,7 @@ static const void *kVCamProxyKey = &kVCamProxyKey;
 }
 
 - (CGImageRef)previewCGImageRepresentation {
-    NSData *jpeg = [[VCamFrameProvider sharedProvider] latestJPEGData];
+    NSData *jpeg = [self fileDataRepresentation];
     if (jpeg.length > 0) {
         UIImage *image = [UIImage imageWithData:jpeg];
         if (image.CGImage) {

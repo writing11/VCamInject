@@ -419,8 +419,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    CIImage *photoOutputImage = [self photoOutputImageFromPreviewImage:previewImage prefersPortrait:photoPrefersPortrait];
-    [self updateLatestJPEGFromImage:photoOutputImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:previewImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -440,17 +439,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 - (CIImage *)photoImageFromSourceImage:(CVImageBufferRef)sourceImage {
     CIImage *rawImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
     return [self imageByApplyingVideoPreferredTransform:rawImage];
-}
-
-- (CIImage *)photoOutputImageFromPreviewImage:(CIImage *)image prefersPortrait:(BOOL)prefersPortrait {
-    BOOL imageLandscape = CGRectGetWidth(image.extent) > CGRectGetHeight(image.extent);
-    if (prefersPortrait && imageLandscape) {
-        return [self image:image byApplyingQuarterTurns:1];
-    }
-    if (!prefersPortrait && !imageLandscape) {
-        return [self image:image byApplyingQuarterTurns:-1];
-    }
-    return image;
 }
 
 - (BOOL)trackPrefersPortrait:(AVAssetTrack *)track {
@@ -555,15 +543,18 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
             return nil;
         }
 
+        NSNumber *orientation = [self orientationFromImageData:photoData];
+        CIImage *outputImage = [self image:self.lastPhotoImage byApplyingEXIFOrientation:orientation];
         CGSize size = [self outputPhotoSizeFromOriginalPhotoData:photoData
+                                                     orientation:orientation
                                                  prefersPortrait:self.lastPhotoPrefersPortrait
-                                                   fallbackImage:self.lastPhotoImage];
+                                                   fallbackImage:outputImage];
         if (size.width <= 0 || size.height <= 0) {
             return self.lastJPEGData;
         }
 
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        NSData *jpeg = [self JPEGFromImage:self.lastPhotoImage
+        NSData *jpeg = [self JPEGFromImage:outputImage
                                      width:(size_t)size.width
                                     height:(size_t)size.height
                                orientation:nil
@@ -575,10 +566,34 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 }
 
-- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData prefersPortrait:(BOOL)prefersPortrait fallbackImage:(CIImage *)image {
+- (CIImage *)image:(CIImage *)image byApplyingEXIFOrientation:(nullable NSNumber *)orientation {
+    if (!orientation) {
+        return image;
+    }
+
+    int value = orientation.intValue;
+    if (value < 1 || value > 8) {
+        return image;
+    }
+
+    CIImage *oriented = [image imageByApplyingOrientation:value];
+    CGRect extent = oriented.extent;
+    if (CGRectIsEmpty(extent)) {
+        return image;
+    }
+    return [oriented imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
+}
+
+- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData orientation:(nullable NSNumber *)orientation prefersPortrait:(BOOL)prefersPortrait fallbackImage:(CIImage *)image {
     CGSize original = [self pixelSizeFromImageData:photoData];
     if (original.width <= 0 || original.height <= 0) {
         return [self fallbackPhotoSizeForImage:image prefersPortrait:prefersPortrait];
+    }
+
+    NSInteger orientationValue = orientation.integerValue;
+    BOOL swapsDimensions = orientationValue == 5 || orientationValue == 6 || orientationValue == 7 || orientationValue == 8;
+    if (swapsDimensions) {
+        return CGSizeMake(original.height, original.width);
     }
 
     CGFloat shortSide = MIN(original.width, original.height);
