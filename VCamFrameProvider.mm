@@ -27,6 +27,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) CIImage *lastPhotoImage;
 @property (nonatomic, assign) NSTimeInterval lastJPEGTime;
 @property (nonatomic, assign) NSTimeInterval activationTime;
+@property (nonatomic, assign) BOOL lastPhotoPrefersPortrait;
 @property (nonatomic, assign) BOOL disabledInProcess;
 @end
 
@@ -385,7 +386,8 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 
     CIImage *previewImage = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
-    CIImage *photoImage = [self photoImageFromSourceImage:sourceImage];
+    CIImage *displayImage = [self photoImageFromSourceImage:sourceImage];
+    BOOL photoPrefersPortrait = CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
     CIImage *image = previewImage;
     CGRect src = image.extent;
     if (CGRectIsEmpty(src)) {
@@ -413,7 +415,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:photoImage colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:previewImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -474,7 +476,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return image;
 }
 
-- (void)updateLatestJPEGFromImage:(CIImage *)image colorSpace:(CGColorSpaceRef)colorSpace {
+- (void)updateLatestJPEGFromImage:(CIImage *)image prefersPortrait:(BOOL)prefersPortrait colorSpace:(CGColorSpaceRef)colorSpace {
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastJPEGTime < 0.25) {
         return;
@@ -485,15 +487,17 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return;
     }
     CIImage *normalized = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
+    CGSize fallbackSize = [self fallbackPhotoSizeForImage:normalized prefersPortrait:prefersPortrait];
 
     NSData *jpeg = [self JPEGFromImage:normalized
-                                 width:(size_t)CGRectGetWidth(normalized.extent)
-                                height:(size_t)CGRectGetHeight(normalized.extent)
+                                 width:(size_t)fallbackSize.width
+                                height:(size_t)fallbackSize.height
                            orientation:nil
                             colorSpace:colorSpace];
     if (jpeg.length > 0) {
         self.lastJPEGData = jpeg;
         self.lastPhotoImage = normalized;
+        self.lastPhotoPrefersPortrait = prefersPortrait;
         self.lastJPEGTime = now;
     }
 }
@@ -513,7 +517,9 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
             return nil;
         }
 
-        CGSize size = [self outputPhotoSizeFromOriginalPhotoData:photoData virtualImage:self.lastPhotoImage];
+        CGSize size = [self outputPhotoSizeFromOriginalPhotoData:photoData
+                                                 prefersPortrait:self.lastPhotoPrefersPortrait
+                                                   fallbackImage:self.lastPhotoImage];
         if (size.width <= 0 || size.height <= 0) {
             return self.lastJPEGData;
         }
@@ -531,23 +537,28 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 }
 
-- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData virtualImage:(CIImage *)image {
+- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData prefersPortrait:(BOOL)prefersPortrait fallbackImage:(CIImage *)image {
     CGSize original = [self pixelSizeFromImageData:photoData];
+    if (original.width <= 0 || original.height <= 0) {
+        return [self fallbackPhotoSizeForImage:image prefersPortrait:prefersPortrait];
+    }
+
+    CGFloat shortSide = MIN(original.width, original.height);
+    CGFloat longSide = MAX(original.width, original.height);
+    return prefersPortrait ? CGSizeMake(shortSide, longSide) : CGSizeMake(longSide, shortSide);
+}
+
+- (CGSize)fallbackPhotoSizeForImage:(CIImage *)image prefersPortrait:(BOOL)prefersPortrait {
     CGRect extent = image.extent;
     if (CGRectIsEmpty(extent)) {
-        return original;
-    }
-    if (original.width <= 0 || original.height <= 0) {
-        return CGSizeMake(CGRectGetWidth(extent), CGRectGetHeight(extent));
+        return CGSizeZero;
     }
 
-    BOOL originalLandscape = original.width > original.height;
-    BOOL virtualLandscape = CGRectGetWidth(extent) > CGRectGetHeight(extent);
-    if (originalLandscape != virtualLandscape) {
-        return CGSizeMake(original.height, original.width);
-    }
-
-    return original;
+    CGFloat width = CGRectGetWidth(extent);
+    CGFloat height = CGRectGetHeight(extent);
+    CGFloat shortSide = MIN(width, height);
+    CGFloat longSide = MAX(width, height);
+    return prefersPortrait ? CGSizeMake(shortSide, longSide) : CGSizeMake(longSide, shortSide);
 }
 
 - (CGSize)pixelSizeFromImageData:(NSData *)data {
