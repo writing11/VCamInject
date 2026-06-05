@@ -13,6 +13,8 @@ static NSString * const kVCamVideoMP4Path = @"/var/mobile/Library/VCam/source.mp
 static NSString * const kVCamVideoMOVPath = @"/var/mobile/Library/VCam/source.mov";
 static NSString * const kVCamVideoM4VPath = @"/var/mobile/Library/VCam/source.m4v";
 static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled";
+static NSString * const kVCamPhotoModePath = @"/var/mobile/Library/VCam/photo_mode";
+static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log";
 
 @interface VCamFrameProvider ()
 @property (nonatomic, strong) AVAssetReader *assetReader;
@@ -30,6 +32,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, assign) NSTimeInterval activationTime;
 @property (nonatomic, assign) BOOL lastPhotoPrefersPortrait;
 @property (nonatomic, assign) BOOL disabledInProcess;
+@property (nonatomic, copy) NSString *latestDebugInfo;
 @end
 
 @implementation VCamFrameProvider
@@ -198,6 +201,27 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return self.selectedVideoURL != nil || [self firstExistingVideoPath] != nil;
 }
 
+- (nullable NSString *)latestDebugInfo {
+    @synchronized (self) {
+        return _latestDebugInfo;
+    }
+}
+
+- (NSString *)currentPhotoModeName {
+    return [self usesSourcePhotoAspect] ? @"\u89c6\u9891\u539f\u6bd4\u4f8b" : @"\u539f\u76f8\u673a\u6bd4\u4f8b";
+}
+
+- (void)togglePhotoOutputMode {
+    @synchronized (self) {
+        BOOL nextUsesCameraAspect = [self usesSourcePhotoAspect];
+        NSString *mode = nextUsesCameraAspect ? @"camera" : @"source";
+        NSFileManager *fm = NSFileManager.defaultManager;
+        [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
+        [mode writeToFile:kVCamPhotoModePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [self updateDebugInfo:[NSString stringWithFormat:@"photo_mode=%@", [self currentPhotoModeName]]];
+    }
+}
+
 - (nullable NSURL *)currentVideoURL {
     if (self.selectedVideoURL) {
         return self.selectedVideoURL;
@@ -219,6 +243,33 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         }
     }
     return nil;
+}
+
+- (BOOL)usesSourcePhotoAspect {
+    NSString *mode = [NSString stringWithContentsOfFile:kVCamPhotoModePath encoding:NSUTF8StringEncoding error:nil];
+    mode = [[mode stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    return ![mode isEqualToString:@"camera"];
+}
+
+- (void)updateDebugInfo:(NSString *)info {
+    if (info.length == 0) {
+        return;
+    }
+
+    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], info];
+    self.latestDebugInfo = line;
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kVCamDebugLogPath];
+    if (!handle) {
+        [line writeToFile:kVCamDebugLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+
+    [handle seekToEndOfFile];
+    [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [handle closeFile];
 }
 
 - (void)resetLocalVideoReader {
@@ -544,7 +595,8 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         }
 
         CIImage *outputImage = self.lastPhotoImage;
-        CGSize size = [self displayPhotoSizeFromOriginalPhotoData:photoData fallbackImage:outputImage];
+        CGSize cameraSize = [self displayPhotoSizeFromOriginalPhotoData:photoData fallbackImage:outputImage];
+        CGSize size = [self outputPhotoSizeForCameraSize:cameraSize sourceImage:outputImage];
         if (size.width <= 0 || size.height <= 0) {
             return self.lastJPEGData;
         }
@@ -558,8 +610,46 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         if (colorSpace) {
             CGColorSpaceRelease(colorSpace);
         }
+        [self updateDebugInfo:[NSString stringWithFormat:
+            @"mode=%@ original=%.0fx%.0f orientation=%@ output=%.0fx%.0f source=%.0fx%.0f",
+            [self currentPhotoModeName],
+            [self pixelSizeFromImageData:photoData].width,
+            [self pixelSizeFromImageData:photoData].height,
+            [self orientationFromImageData:photoData] ?: @"nil",
+            size.width,
+            size.height,
+            CGRectGetWidth(outputImage.extent),
+            CGRectGetHeight(outputImage.extent)]];
         return jpeg ?: self.lastJPEGData;
     }
+}
+
+- (CGSize)outputPhotoSizeForCameraSize:(CGSize)cameraSize sourceImage:(CIImage *)image {
+    if (![self usesSourcePhotoAspect]) {
+        return cameraSize;
+    }
+
+    CGRect extent = image.extent;
+    if (CGRectIsEmpty(extent) || cameraSize.width <= 0 || cameraSize.height <= 0) {
+        return cameraSize;
+    }
+
+    CGFloat sourceWidth = CGRectGetWidth(extent);
+    CGFloat sourceHeight = CGRectGetHeight(extent);
+    if (sourceWidth <= 0 || sourceHeight <= 0) {
+        return cameraSize;
+    }
+
+    CGFloat sourceAspect = sourceWidth / sourceHeight;
+    CGFloat longSide = MAX(cameraSize.width, cameraSize.height);
+    if (sourceAspect <= 0 || longSide <= 0) {
+        return cameraSize;
+    }
+
+    if (sourceHeight >= sourceWidth) {
+        return CGSizeMake(round(longSide * sourceAspect), round(longSide));
+    }
+    return CGSizeMake(round(longSide), round(longSide / sourceAspect));
 }
 
 - (CGSize)displayPhotoSizeFromOriginalPhotoData:(NSData *)photoData fallbackImage:(CIImage *)image {

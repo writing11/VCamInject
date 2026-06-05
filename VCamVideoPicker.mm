@@ -91,13 +91,32 @@
     }
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
-                                                                   message:VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236\n\u9884\u89c8\u65b9\u5411+\u663e\u793a\u5c3a\u5bf8\u4fee\u6b63\u7248 17:55")
+                                                                   message:VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236\n\u8bca\u65ad+\u89c6\u9891\u539f\u6bd4\u4f8b\u7248 21:15")
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9009\u62e9\u89c6\u9891\u5e76\u66ff\u6362")
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
         [self presentPhotoPickerFromWindow:window];
+    }]];
+
+    NSString *modeTitle = [NSString stringWithFormat:@"%@: %@", VCamText("\u5207\u6362\u7167\u7247\u6bd4\u4f8b"), [[VCamFrameProvider sharedProvider] currentPhotoModeName]];
+    [alert addAction:[UIAlertAction actionWithTitle:modeTitle
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        [[VCamFrameProvider sharedProvider] togglePhotoOutputMode];
+        NSString *message = [NSString stringWithFormat:@"%@: %@", VCamText("\u5f53\u524d\u7167\u7247\u6bd4\u4f8b"), [[VCamFrameProvider sharedProvider] currentPhotoModeName]];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showMessage:message from:top];
+        });
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u663e\u793a\u8c03\u8bd5\u4fe1\u606f")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showDebugInfoFrom:top];
+        });
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u6062\u590d\u539f\u76f8\u673a")
@@ -301,6 +320,25 @@
             [alert dismissViewControllerAnimated:YES completion:nil];
         });
     }];
+}
+
+- (void)showDebugInfoFrom:(UIViewController *)controller {
+    if (!controller || controller.presentedViewController) {
+        return;
+    }
+
+    NSString *info = [[VCamFrameProvider sharedProvider] latestDebugInfo];
+    if (info.length == 0) {
+        info = VCamText("\u6682\u65e0\u8c03\u8bd5\u4fe1\u606f\uff0c\u5148\u62cd\u4e00\u5f20\u7167\u7247\u518d\u67e5\u770b");
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:VCamText("\u8c03\u8bd5\u4fe1\u606f")
+                                                                   message:info
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u597d")
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    [controller presentViewController:alert animated:YES completion:nil];
 }
 
 @end
