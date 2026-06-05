@@ -544,9 +544,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         }
 
         CIImage *outputImage = self.lastPhotoImage;
-        CGSize size = [self outputPhotoSizeFromOriginalPhotoData:photoData
-                                                 prefersPortrait:self.lastPhotoPrefersPortrait
-                                                   fallbackImage:outputImage];
+        CGSize size = [self displayPhotoSizeFromOriginalPhotoData:photoData fallbackImage:outputImage];
         if (size.width <= 0 || size.height <= 0) {
             return self.lastJPEGData;
         }
@@ -564,15 +562,20 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 }
 
-- (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData prefersPortrait:(BOOL)prefersPortrait fallbackImage:(CIImage *)image {
+- (CGSize)displayPhotoSizeFromOriginalPhotoData:(NSData *)photoData fallbackImage:(CIImage *)image {
     CGSize original = [self pixelSizeFromImageData:photoData];
     if (original.width <= 0 || original.height <= 0) {
-        return [self fallbackPhotoSizeForImage:image prefersPortrait:prefersPortrait];
+        return [self fallbackPhotoSizeForImage:image prefersPortrait:self.lastPhotoPrefersPortrait];
     }
 
-    CGFloat shortSide = MIN(original.width, original.height);
-    CGFloat longSide = MAX(original.width, original.height);
-    return prefersPortrait ? CGSizeMake(shortSide, longSide) : CGSizeMake(longSide, shortSide);
+    NSNumber *orientation = [self orientationFromImageData:photoData];
+    NSInteger orientationValue = orientation.integerValue;
+    BOOL displaysWithSwappedDimensions = orientationValue == 5 || orientationValue == 6 || orientationValue == 7 || orientationValue == 8;
+    if (displaysWithSwappedDimensions) {
+        return CGSizeMake(original.height, original.width);
+    }
+
+    return original;
 }
 
 - (CGSize)fallbackPhotoSizeForImage:(CIImage *)image prefersPortrait:(BOOL)prefersPortrait {
@@ -603,6 +606,21 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     NSNumber *width = props[(NSString *)kCGImagePropertyPixelWidth];
     NSNumber *height = props[(NSString *)kCGImagePropertyPixelHeight];
     return CGSizeMake(width.doubleValue, height.doubleValue);
+}
+
+- (nullable NSNumber *)orientationFromImageData:(NSData *)data {
+    if (data.length == 0) {
+        return nil;
+    }
+
+    CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+    if (!source) {
+        return nil;
+    }
+
+    NSDictionary *props = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, NULL));
+    CFRelease(source);
+    return props[(NSString *)kCGImagePropertyOrientation];
 }
 
 - (nullable NSData *)JPEGFromImage:(CIImage *)image width:(size_t)width height:(size_t)height orientation:(nullable NSNumber *)orientation colorSpace:(CGColorSpaceRef)colorSpace {
