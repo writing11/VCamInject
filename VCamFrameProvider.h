@@ -11,7 +11,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)disableVirtualCamera;
 - (BOOL)isVirtualCameraEnabled;
 - (BOOL)hasLocalVideo;
-- (void)rotateVideoClockwise;
 - (nullable NSData *)latestJPEGData;
 - (nullable NSData *)latestJPEGDataMatchingPhotoData:(NSData *)photoData;
 @end

@@ -44,13 +44,13 @@
     }
 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.frame = CGRectMake(MAX(12, window.bounds.size.width - 112), 120, 96, 40);
+    button.frame = CGRectMake(MAX(12, window.bounds.size.width - 68), 120, 52, 52);
     button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
-    button.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.78];
-    button.layer.cornerRadius = 20;
+    button.backgroundColor = [UIColor colorWithRed:0.92 green:0.05 blue:0.05 alpha:0.9];
+    button.layer.cornerRadius = 26;
     button.layer.masksToBounds = YES;
-    button.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-    [button setTitle:VCamText("\u865a\u62df\u76f8\u673a") forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont boldSystemFontOfSize:28];
+    [button setTitle:@"Y" forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [button addTarget:self action:@selector(controlButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -100,14 +100,8 @@
         [self presentPhotoPickerFromWindow:window];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u624b\u52a8\u65cb\u8f6c90\u00b0")
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
-        [[VCamFrameProvider sharedProvider] rotateVideoClockwise];
-    }]];
-
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u6062\u590d\u539f\u76f8\u673a")
-                                              style:UIAlertActionStyleDestructive
+                                             style:UIAlertActionStyleDestructive
                                             handler:^(__unused UIAlertAction *action) {
         [[VCamFrameProvider sharedProvider] disableVirtualCamera];
         [self showMessage:VCamText("\u5df2\u6062\u590d\u539f\u76f8\u673a") from:top];

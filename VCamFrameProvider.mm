@@ -27,8 +27,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, strong) CIImage *lastPhotoImage;
 @property (nonatomic, assign) NSTimeInterval lastJPEGTime;
 @property (nonatomic, assign) NSTimeInterval activationTime;
-@property (nonatomic, assign) NSInteger autoPreviewRotationQuarterTurns;
-@property (nonatomic, assign) NSInteger manualRotationQuarterTurns;
 @property (nonatomic, assign) BOOL disabledInProcess;
 @end
 
@@ -198,14 +196,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return self.selectedVideoURL != nil || [self firstExistingVideoPath] != nil;
 }
 
-- (void)rotateVideoClockwise {
-    @synchronized (self) {
-        self.manualRotationQuarterTurns = (self.manualRotationQuarterTurns + 1) % 4;
-        self.lastJPEGData = nil;
-        self.lastJPEGTime = 0;
-    }
-}
-
 - (nullable NSURL *)currentVideoURL {
     if (self.selectedVideoURL) {
         return self.selectedVideoURL;
@@ -277,7 +267,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     self.activeVideoPath = url.path;
     self.activeVideoMTime = 0;
     self.videoPreferredTransform = track.preferredTransform;
-    self.autoPreviewRotationQuarterTurns = [self previewRotationQuarterTurnsForTrack:track];
 }
 
 - (nullable CMSampleBufferRef)copySampleBuffer:(CMSampleBufferRef)source withTimingFrom:(CMSampleBufferRef)reference {
@@ -396,7 +385,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 
     CIImage *previewImage = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
-    CIImage *photoImage = [self photoImageFromSourceImage:sourceImage];
     CIImage *image = previewImage;
     CGRect src = image.extent;
     if (CGRectIsEmpty(src)) {
@@ -424,7 +412,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:photoImage colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:previewImage colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -438,13 +426,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     CIImage *rawImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
     CIImage *image = [self imageByApplyingVideoPreferredTransform:rawImage];
     image = [self image:image byApplyingQuarterTurns:[self previewQuarterTurnsForImage:image targetWidth:targetWidth targetHeight:targetHeight]];
-    return [self imageByApplyingManualRotation:image];
-}
-
-- (CIImage *)photoImageFromSourceImage:(CVImageBufferRef)sourceImage {
-    CIImage *image = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
-    image = [self imageByApplyingVideoPreferredTransform:image];
-    return [self imageByApplyingManualRotation:image];
+    return image;
 }
 
 - (CIImage *)imageByApplyingVideoPreferredTransform:(CIImage *)image {
@@ -456,10 +438,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 
     return image;
-}
-
-- (CIImage *)imageByApplyingManualRotation:(CIImage *)image {
-    return [self image:image byApplyingQuarterTurns:self.manualRotationQuarterTurns];
 }
 
 - (NSInteger)previewQuarterTurnsForImage:(CIImage *)image targetWidth:(size_t)targetWidth targetHeight:(size_t)targetHeight {
@@ -488,20 +466,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         image = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
     }
     return image;
-}
-
-- (NSInteger)previewRotationQuarterTurnsForTrack:(AVAssetTrack *)track {
-    CGSize natural = track.naturalSize;
-    CGAffineTransform t = track.preferredTransform;
-    CGRect displayed = CGRectApplyAffineTransform(CGRectMake(0, 0, natural.width, natural.height), t);
-    BOOL encodedLandscape = natural.width > natural.height;
-    BOOL displayedPortrait = fabs(CGRectGetHeight(displayed)) > fabs(CGRectGetWidth(displayed));
-
-    if (encodedLandscape && displayedPortrait) {
-        return 1;
-    }
-
-    return 0;
 }
 
 - (void)updateLatestJPEGFromImage:(CIImage *)image colorSpace:(CGColorSpaceRef)colorSpace {
