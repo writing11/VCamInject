@@ -385,6 +385,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 
     CIImage *previewImage = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
+    CIImage *photoImage = [self photoImageFromSourceImage:sourceImage];
     CIImage *image = previewImage;
     CGRect src = image.extent;
     if (CGRectIsEmpty(src)) {
@@ -412,7 +413,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:previewImage colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:photoImage colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -427,6 +428,11 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     CIImage *image = [self imageByApplyingVideoPreferredTransform:rawImage];
     image = [self image:image byApplyingQuarterTurns:[self previewQuarterTurnsForImage:image targetWidth:targetWidth targetHeight:targetHeight]];
     return image;
+}
+
+- (CIImage *)photoImageFromSourceImage:(CVImageBufferRef)sourceImage {
+    CIImage *rawImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)sourceImage];
+    return [self imageByApplyingVideoPreferredTransform:rawImage];
 }
 
 - (CIImage *)imageByApplyingVideoPreferredTransform:(CIImage *)image {
