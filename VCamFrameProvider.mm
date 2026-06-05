@@ -419,7 +419,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:previewImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:displayImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -543,8 +543,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
             return nil;
         }
 
-        NSNumber *orientation = [self orientationFromImageData:photoData];
-        CIImage *outputImage = [self image:self.lastPhotoImage byApplyingEXIFOrientation:orientation];
+        CIImage *outputImage = self.lastPhotoImage;
         CGSize size = [self outputPhotoSizeFromOriginalPhotoData:photoData
                                                  prefersPortrait:self.lastPhotoPrefersPortrait
                                                    fallbackImage:outputImage];
@@ -563,24 +562,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         }
         return jpeg ?: self.lastJPEGData;
     }
-}
-
-- (CIImage *)image:(CIImage *)image byApplyingEXIFOrientation:(nullable NSNumber *)orientation {
-    if (!orientation) {
-        return image;
-    }
-
-    int value = orientation.intValue;
-    if (value < 1 || value > 8) {
-        return image;
-    }
-
-    CIImage *oriented = [image imageByApplyingOrientation:value];
-    CGRect extent = oriented.extent;
-    if (CGRectIsEmpty(extent)) {
-        return image;
-    }
-    return [oriented imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
 }
 
 - (CGSize)outputPhotoSizeFromOriginalPhotoData:(NSData *)photoData prefersPortrait:(BOOL)prefersPortrait fallbackImage:(CIImage *)image {
@@ -622,22 +603,6 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     NSNumber *width = props[(NSString *)kCGImagePropertyPixelWidth];
     NSNumber *height = props[(NSString *)kCGImagePropertyPixelHeight];
     return CGSizeMake(width.doubleValue, height.doubleValue);
-}
-
-- (nullable NSNumber *)orientationFromImageData:(NSData *)data {
-    if (data.length == 0) {
-        return nil;
-    }
-
-    CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
-    if (!source) {
-        return nil;
-    }
-
-    NSDictionary *props = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, NULL));
-    CFRelease(source);
-    NSNumber *orientation = props[(NSString *)kCGImagePropertyOrientation];
-    return orientation;
 }
 
 - (nullable NSData *)JPEGFromImage:(CIImage *)image width:(size_t)width height:(size_t)height orientation:(nullable NSNumber *)orientation colorSpace:(CGColorSpaceRef)colorSpace {
