@@ -419,7 +419,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:displayImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
+    [self updateLatestJPEGFromImage:previewImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
