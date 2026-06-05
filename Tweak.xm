@@ -47,6 +47,31 @@
 
 static const void *kVCamProxyKey = &kVCamProxyKey;
 
+static CGImageRef VCamCreateDisplayCGImageFromJPEG(NSData *jpeg) {
+    if (jpeg.length == 0) {
+        return nil;
+    }
+
+    UIImage *image = [UIImage imageWithData:jpeg];
+    if (!image) {
+        return nil;
+    }
+
+    if (image.imageOrientation == UIImageOrientationUp && image.CGImage) {
+        return CGImageRetain(image.CGImage);
+    }
+
+    UIGraphicsBeginImageContextWithOptions(image.size, YES, image.scale);
+    [image drawInRect:CGRectMake(0, 0, image.size.width, image.size.height)];
+    UIImage *normalized = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+
+    if (normalized.CGImage) {
+        return CGImageRetain(normalized.CGImage);
+    }
+    return nil;
+}
+
 %hook AVCaptureVideoDataOutput
 
 - (void)setSampleBufferDelegate:(id<AVCaptureVideoDataOutputSampleBufferDelegate>)sampleBufferDelegate
@@ -78,22 +103,18 @@ static const void *kVCamProxyKey = &kVCamProxyKey;
 
 - (CGImageRef)CGImageRepresentation {
     NSData *jpeg = [self fileDataRepresentation];
-    if (jpeg.length > 0) {
-        UIImage *image = [UIImage imageWithData:jpeg];
-        if (image.CGImage) {
-            return CGImageRetain(image.CGImage);
-        }
+    CGImageRef image = VCamCreateDisplayCGImageFromJPEG(jpeg);
+    if (image) {
+        return image;
     }
     return %orig;
 }
 
 - (CGImageRef)previewCGImageRepresentation {
     NSData *jpeg = [self fileDataRepresentation];
-    if (jpeg.length > 0) {
-        UIImage *image = [UIImage imageWithData:jpeg];
-        if (image.CGImage) {
-            return CGImageRetain(image.CGImage);
-        }
+    CGImageRef image = VCamCreateDisplayCGImageFromJPEG(jpeg);
+    if (image) {
+        return image;
     }
     return %orig;
 }

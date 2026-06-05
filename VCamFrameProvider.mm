@@ -13,8 +13,6 @@ static NSString * const kVCamVideoMP4Path = @"/var/mobile/Library/VCam/source.mp
 static NSString * const kVCamVideoMOVPath = @"/var/mobile/Library/VCam/source.mov";
 static NSString * const kVCamVideoM4VPath = @"/var/mobile/Library/VCam/source.m4v";
 static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled";
-static NSString * const kVCamPhotoModePath = @"/var/mobile/Library/VCam/photo_mode";
-static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log";
 
 @interface VCamFrameProvider ()
 @property (nonatomic, strong) AVAssetReader *assetReader;
@@ -28,11 +26,11 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
 @property (nonatomic, assign) BOOL sourceVideoPrefersPortrait;
 @property (nonatomic, strong) NSData *lastJPEGData;
 @property (nonatomic, strong) CIImage *lastPhotoImage;
+@property (nonatomic, strong) CIImage *lastPreviewImage;
 @property (nonatomic, assign) NSTimeInterval lastJPEGTime;
 @property (nonatomic, assign) NSTimeInterval activationTime;
 @property (nonatomic, assign) BOOL lastPhotoPrefersPortrait;
 @property (nonatomic, assign) BOOL disabledInProcess;
-@property (nonatomic, copy) NSString *latestDebugInfo;
 @end
 
 @implementation VCamFrameProvider
@@ -201,27 +199,6 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
     return self.selectedVideoURL != nil || [self firstExistingVideoPath] != nil;
 }
 
-- (nullable NSString *)latestDebugInfo {
-    @synchronized (self) {
-        return _latestDebugInfo;
-    }
-}
-
-- (NSString *)currentPhotoModeName {
-    return [self usesSourcePhotoAspect] ? @"\u89c6\u9891\u539f\u6bd4\u4f8b" : @"\u539f\u76f8\u673a\u6bd4\u4f8b";
-}
-
-- (void)togglePhotoOutputMode {
-    @synchronized (self) {
-        BOOL nextUsesCameraAspect = [self usesSourcePhotoAspect];
-        NSString *mode = nextUsesCameraAspect ? @"camera" : @"source";
-        NSFileManager *fm = NSFileManager.defaultManager;
-        [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
-        [mode writeToFile:kVCamPhotoModePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        [self updateDebugInfo:[NSString stringWithFormat:@"photo_mode=%@", [self currentPhotoModeName]]];
-    }
-}
-
 - (nullable NSURL *)currentVideoURL {
     if (self.selectedVideoURL) {
         return self.selectedVideoURL;
@@ -243,33 +220,6 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
         }
     }
     return nil;
-}
-
-- (BOOL)usesSourcePhotoAspect {
-    NSString *mode = [NSString stringWithContentsOfFile:kVCamPhotoModePath encoding:NSUTF8StringEncoding error:nil];
-    mode = [[mode stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
-    return ![mode isEqualToString:@"camera"];
-}
-
-- (void)updateDebugInfo:(NSString *)info {
-    if (info.length == 0) {
-        return;
-    }
-
-    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], info];
-    self.latestDebugInfo = line;
-
-    NSFileManager *fm = NSFileManager.defaultManager;
-    [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kVCamDebugLogPath];
-    if (!handle) {
-        [line writeToFile:kVCamDebugLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        return;
-    }
-
-    [handle seekToEndOfFile];
-    [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-    [handle closeFile];
 }
 
 - (void)resetLocalVideoReader {
@@ -442,7 +392,7 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
 
     CIImage *previewImage = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
     CIImage *displayImage = [self photoImageFromSourceImage:sourceImage];
-    BOOL photoPrefersPortrait = self.sourceVideoPrefersPortrait || CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
+    BOOL photoPrefersPortrait = CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
     CIImage *image = previewImage;
     CGRect src = image.extent;
     if (CGRectIsEmpty(src)) {
@@ -470,7 +420,7 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
       toCVPixelBuffer:(CVPixelBufferRef)referenceImage
                bounds:CGRectMake(0, 0, dstWidth, dstHeight)
            colorSpace:colorSpace];
-    [self updateLatestJPEGFromImage:previewImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
+    [self updateLatestJPEGFromDisplayImage:displayImage previewImage:previewImage prefersPortrait:photoPrefersPortrait colorSpace:colorSpace];
     if (colorSpace) {
         CGColorSpaceRelease(colorSpace);
     }
@@ -553,17 +503,22 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
     return image;
 }
 
-- (void)updateLatestJPEGFromImage:(CIImage *)image prefersPortrait:(BOOL)prefersPortrait colorSpace:(CGColorSpaceRef)colorSpace {
+- (void)updateLatestJPEGFromDisplayImage:(CIImage *)displayImage previewImage:(CIImage *)previewImage prefersPortrait:(BOOL)prefersPortrait colorSpace:(CGColorSpaceRef)colorSpace {
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastJPEGTime < 0.25) {
         return;
     }
 
-    CGRect extent = image.extent;
+    CGRect extent = displayImage.extent;
     if (CGRectIsEmpty(extent)) {
         return;
     }
-    CIImage *normalized = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
+    CIImage *normalized = [displayImage imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
+    CIImage *normalizedPreview = nil;
+    CGRect previewExtent = previewImage.extent;
+    if (!CGRectIsEmpty(previewExtent)) {
+        normalizedPreview = [previewImage imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(previewExtent), -CGRectGetMinY(previewExtent))];
+    }
     CGSize fallbackSize = [self fallbackPhotoSizeForImage:normalized prefersPortrait:prefersPortrait];
 
     NSData *jpeg = [self JPEGFromImage:normalized
@@ -574,6 +529,7 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
     if (jpeg.length > 0) {
         self.lastJPEGData = jpeg;
         self.lastPhotoImage = normalized;
+        self.lastPreviewImage = normalizedPreview;
         self.lastPhotoPrefersPortrait = prefersPortrait;
         self.lastJPEGTime = now;
     }
@@ -594,62 +550,63 @@ static NSString * const kVCamDebugLogPath = @"/var/mobile/Library/VCam/debug.log
             return nil;
         }
 
-        CIImage *outputImage = self.lastPhotoImage;
-        CGSize cameraSize = [self displayPhotoSizeFromOriginalPhotoData:photoData fallbackImage:outputImage];
-        CGSize size = [self outputPhotoSizeForCameraSize:cameraSize sourceImage:outputImage];
-        if (size.width <= 0 || size.height <= 0) {
+        CGSize rawSize = [self pixelSizeFromImageData:photoData];
+        if (rawSize.width <= 0 || rawSize.height <= 0) {
             return self.lastJPEGData;
         }
 
+        NSNumber *orientation = [self orientationFromImageData:photoData];
+        CGSize displaySize = [self displayPhotoSizeFromOriginalPhotoData:photoData fallbackImage:self.lastPhotoImage];
+        BOOL targetPortrait = displaySize.height > displaySize.width;
+        CIImage *displayImage = [self bestPhotoImageForTargetPortrait:targetPortrait];
+        CIImage *outputImage = [self imagePreparedForRawPhotoStorageFromDisplayImage:displayImage orientation:orientation];
+
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
         NSData *jpeg = [self JPEGFromImage:outputImage
-                                     width:(size_t)size.width
-                                    height:(size_t)size.height
-                               orientation:nil
+                                     width:(size_t)rawSize.width
+                                    height:(size_t)rawSize.height
+                               orientation:orientation
                                 colorSpace:colorSpace];
         if (colorSpace) {
             CGColorSpaceRelease(colorSpace);
         }
-        [self updateDebugInfo:[NSString stringWithFormat:
-            @"mode=%@ original=%.0fx%.0f orientation=%@ output=%.0fx%.0f source=%.0fx%.0f",
-            [self currentPhotoModeName],
-            [self pixelSizeFromImageData:photoData].width,
-            [self pixelSizeFromImageData:photoData].height,
-            [self orientationFromImageData:photoData] ?: @"nil",
-            size.width,
-            size.height,
-            CGRectGetWidth(outputImage.extent),
-            CGRectGetHeight(outputImage.extent)]];
         return jpeg ?: self.lastJPEGData;
     }
 }
 
-- (CGSize)outputPhotoSizeForCameraSize:(CGSize)cameraSize sourceImage:(CIImage *)image {
-    if (![self usesSourcePhotoAspect]) {
-        return cameraSize;
+- (CIImage *)bestPhotoImageForTargetPortrait:(BOOL)targetPortrait {
+    CIImage *displayImage = self.lastPhotoImage;
+    CIImage *previewImage = self.lastPreviewImage;
+    if (!previewImage) {
+        return displayImage;
     }
 
-    CGRect extent = image.extent;
-    if (CGRectIsEmpty(extent) || cameraSize.width <= 0 || cameraSize.height <= 0) {
-        return cameraSize;
+    BOOL displayPortrait = CGRectGetHeight(displayImage.extent) > CGRectGetWidth(displayImage.extent);
+    BOOL previewPortrait = CGRectGetHeight(previewImage.extent) > CGRectGetWidth(previewImage.extent);
+    if (displayPortrait == targetPortrait) {
+        return displayImage;
     }
+    if (previewPortrait == targetPortrait) {
+        return previewImage;
+    }
+    return displayImage;
+}
 
-    CGFloat sourceWidth = CGRectGetWidth(extent);
-    CGFloat sourceHeight = CGRectGetHeight(extent);
-    if (sourceWidth <= 0 || sourceHeight <= 0) {
-        return cameraSize;
+- (CIImage *)imagePreparedForRawPhotoStorageFromDisplayImage:(CIImage *)image orientation:(nullable NSNumber *)orientation {
+    NSInteger orientationValue = orientation.integerValue;
+    switch (orientationValue) {
+        case 3:
+        case 4:
+            return [self image:image byApplyingQuarterTurns:2];
+        case 6:
+        case 7:
+            return [self image:image byApplyingQuarterTurns:1];
+        case 5:
+        case 8:
+            return [self image:image byApplyingQuarterTurns:-1];
+        default:
+            return [self image:image byApplyingQuarterTurns:0];
     }
-
-    CGFloat sourceAspect = sourceWidth / sourceHeight;
-    CGFloat longSide = MAX(cameraSize.width, cameraSize.height);
-    if (sourceAspect <= 0 || longSide <= 0) {
-        return cameraSize;
-    }
-
-    if (sourceHeight >= sourceWidth) {
-        return CGSizeMake(round(longSide * sourceAspect), round(longSide));
-    }
-    return CGSizeMake(round(longSide), round(longSide / sourceAspect));
 }
 
 - (CGSize)displayPhotoSizeFromOriginalPhotoData:(NSData *)photoData fallbackImage:(CIImage *)image {

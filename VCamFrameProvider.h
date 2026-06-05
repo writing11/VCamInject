@@ -13,9 +13,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)hasLocalVideo;
 - (nullable NSData *)latestJPEGData;
 - (nullable NSData *)latestJPEGDataMatchingPhotoData:(NSData *)photoData;
-- (nullable NSString *)latestDebugInfo;
-- (NSString *)currentPhotoModeName;
-- (void)togglePhotoOutputMode;
 @end
 
 NS_ASSUME_NONNULL_END
