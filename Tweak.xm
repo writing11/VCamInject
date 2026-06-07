@@ -1,4 +1,5 @@
 #import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -46,6 +47,11 @@
 @end
 
 static const void *kVCamProxyKey = &kVCamProxyKey;
+static const void *kVCamPreviewOverlayKey = &kVCamPreviewOverlayKey;
+static const void *kVCamPreviewTickerKey = &kVCamPreviewTickerKey;
+static const void *kVCamPreviewDisplayLinkKey = &kVCamPreviewDisplayLinkKey;
+
+static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer);
 
 static CGImageRef VCamCreateDisplayCGImageFromJPEG(NSData *jpeg) {
     if (jpeg.length == 0) {
@@ -72,6 +78,113 @@ static CGImageRef VCamCreateDisplayCGImageFromJPEG(NSData *jpeg) {
     return nil;
 }
 
+@interface VCamPreviewOverlayTicker : NSObject
+@property (nonatomic, weak) AVCaptureVideoPreviewLayer *previewLayer;
+@end
+
+@implementation VCamPreviewOverlayTicker
+
+- (void)tick:(CADisplayLink *)link {
+    (void)link;
+    VCamUpdatePreviewLayer(self.previewLayer);
+}
+
+@end
+
+static CALayer *VCamOverlayLayerForPreview(AVCaptureVideoPreviewLayer *previewLayer, BOOL create) {
+    if (!previewLayer) {
+        return nil;
+    }
+
+    CALayer *overlay = objc_getAssociatedObject(previewLayer, kVCamPreviewOverlayKey);
+    if (!overlay && create) {
+        overlay = [CALayer layer];
+        overlay.frame = previewLayer.bounds;
+        overlay.masksToBounds = YES;
+        overlay.hidden = YES;
+        overlay.contentsGravity = kCAGravityResizeAspectFill;
+        overlay.backgroundColor = UIColor.blackColor.CGColor;
+        [previewLayer addSublayer:overlay];
+        objc_setAssociatedObject(previewLayer, kVCamPreviewOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    return overlay;
+}
+
+static void VCamEnsurePreviewOverlay(AVCaptureVideoPreviewLayer *previewLayer) {
+    if (!previewLayer) {
+        return;
+    }
+
+    VCamOverlayLayerForPreview(previewLayer, YES);
+
+    CADisplayLink *link = objc_getAssociatedObject(previewLayer, kVCamPreviewDisplayLinkKey);
+    if (!link) {
+        VCamPreviewOverlayTicker *ticker = [VCamPreviewOverlayTicker new];
+        ticker.previewLayer = previewLayer;
+        link = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(tick:)];
+        if ([link respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
+            link.preferredFramesPerSecond = 24;
+        }
+        [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+        objc_setAssociatedObject(previewLayer, kVCamPreviewTickerKey, ticker, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(previewLayer, kVCamPreviewDisplayLinkKey, link, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    VCamUpdatePreviewLayer(previewLayer);
+}
+
+static void VCamStopPreviewOverlay(AVCaptureVideoPreviewLayer *previewLayer) {
+    if (!previewLayer) {
+        return;
+    }
+
+    CADisplayLink *link = objc_getAssociatedObject(previewLayer, kVCamPreviewDisplayLinkKey);
+    [link invalidate];
+    objc_setAssociatedObject(previewLayer, kVCamPreviewDisplayLinkKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(previewLayer, kVCamPreviewTickerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    CALayer *overlay = objc_getAssociatedObject(previewLayer, kVCamPreviewOverlayKey);
+    [overlay removeFromSuperlayer];
+    objc_setAssociatedObject(previewLayer, kVCamPreviewOverlayKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer) {
+    if (!previewLayer) {
+        return;
+    }
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            VCamUpdatePreviewLayer(previewLayer);
+        });
+        return;
+    }
+
+    CALayer *overlay = VCamOverlayLayerForPreview(previewLayer, YES);
+    overlay.frame = previewLayer.bounds;
+
+    VCamFrameProvider *provider = [VCamFrameProvider sharedProvider];
+    if (![provider hasAnyVirtualSource]) {
+        overlay.hidden = YES;
+        overlay.contents = nil;
+        return;
+    }
+
+    overlay.hidden = NO;
+    CGSize size = previewLayer.bounds.size;
+    NSData *jpeg = [provider previewJPEGDataForSize:size];
+    if (jpeg.length == 0) {
+        overlay.contents = nil;
+        return;
+    }
+
+    CGImageRef image = VCamCreateDisplayCGImageFromJPEG(jpeg);
+    if (image) {
+        overlay.contents = (__bridge id)image;
+        CGImageRelease(image);
+    }
+}
+
 %hook AVCaptureVideoDataOutput
 
 - (void)setSampleBufferDelegate:(id<AVCaptureVideoDataOutputSampleBufferDelegate>)sampleBufferDelegate
@@ -86,6 +199,44 @@ static CGImageRef VCamCreateDisplayCGImageFromJPEG(NSData *jpeg) {
     proxy.originalDelegate = sampleBufferDelegate;
     objc_setAssociatedObject(self, kVCamProxyKey, proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     %orig((id<AVCaptureVideoDataOutputSampleBufferDelegate>)proxy, sampleBufferCallbackQueue);
+}
+
+%end
+
+%hook AVCaptureVideoPreviewLayer
+
+- (instancetype)initWithSession:(AVCaptureSession *)session {
+    self = %orig(session);
+    if (self) {
+        VCamEnsurePreviewOverlay(self);
+    }
+    return self;
+}
+
++ (instancetype)layerWithSession:(AVCaptureSession *)session {
+    AVCaptureVideoPreviewLayer *layer = %orig(session);
+    VCamEnsurePreviewOverlay(layer);
+    return layer;
+}
+
+- (void)layoutSublayers {
+    %orig;
+    VCamEnsurePreviewOverlay(self);
+}
+
+- (void)setFrame:(CGRect)frame {
+    %orig(frame);
+    VCamEnsurePreviewOverlay(self);
+}
+
+- (void)setBounds:(CGRect)bounds {
+    %orig(bounds);
+    VCamEnsurePreviewOverlay(self);
+}
+
+- (void)removeFromSuperlayer {
+    VCamStopPreviewOverlay(self);
+    %orig;
 }
 
 %end
@@ -133,20 +284,20 @@ static NSTimeInterval vcamLastTwoFingerTap = 0;
     }
 
     NSSet<UITouch *> *touches = event.allTouches;
-    if (touches.count < 2) {
+    if (touches.count != 2) {
         return;
     }
 
-    BOOL hasBeganTouch = NO;
+    NSUInteger beganCount = 0;
     NSUInteger tapCount = 0;
     for (UITouch *touch in touches) {
         if (touch.phase == UITouchPhaseBegan) {
-            hasBeganTouch = YES;
+            beganCount++;
         }
         tapCount = MAX(tapCount, touch.tapCount);
     }
 
-    if (!hasBeganTouch || tapCount < 1) {
+    if (beganCount != 2 || tapCount < 1) {
         return;
     }
 

@@ -4,7 +4,8 @@ RootHide/rootless iOS camera replacement tweak.
 
 ## What this build does
 
-- Injects into apps that use `AVCaptureVideoDataOutput`.
+- Injects into apps that use `AVCaptureVideoDataOutput`, `AVCaptureVideoPreviewLayer`, or `AVCapturePhoto`.
+- Covers `AVCaptureVideoPreviewLayer` with the current virtual source so apps do not keep showing the real camera preview while receiving replaced frames.
 - Replaces camera sample buffers with a selected video.
 - Two-finger quick double tap shows or hides a small floating red `Y` button.
 - Tap the floating button to open the control menu.
@@ -16,7 +17,7 @@ RootHide/rootless iOS camera replacement tweak.
 ## Phone controls
 
 1. Open the target app camera page.
-2. Tap the screen twice quickly with two fingers.
+2. Tap the screen twice quickly with exactly two fingers.
 3. A floating red `Y` button appears.
 4. Tap `VCam`.
 5. Choose `Choose video and replace`.

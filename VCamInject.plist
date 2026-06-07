@@ -2,6 +2,8 @@
     Filter = {
         Classes = (
             "AVCaptureVideoDataOutput",
+            "AVCaptureVideoPreviewLayer",
+            "AVCapturePhoto",
             "UIWindow"
         );
     };

@@ -221,6 +221,19 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return self.selectedVideoURL != nil || [self firstExistingVideoPath] != nil;
 }
 
+- (BOOL)hasAnyVirtualSource {
+    @synchronized (self) {
+        if (![self isVirtualCameraEnabled]) {
+            return NO;
+        }
+        NSFileManager *fm = NSFileManager.defaultManager;
+        if ([fm fileExistsAtPath:kVCamFramePath] && [fm fileExistsAtPath:kVCamInfoPath]) {
+            return YES;
+        }
+        return [self hasLocalVideo];
+    }
+}
+
 - (nullable NSURL *)currentVideoURL {
     if (self.selectedVideoURL) {
         return self.selectedVideoURL;
@@ -566,6 +579,47 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 }
 
+- (nullable NSData *)previewJPEGDataForSize:(CGSize)size {
+    @synchronized (self) {
+        if (![self isVirtualCameraEnabled]) {
+            return nil;
+        }
+
+        size_t width = (size_t)MAX(1.0, floor(size.width));
+        size_t height = (size_t)MAX(1.0, floor(size.height));
+        CIImage *image = [self rawFramePreviewImageForWidth:width height:height];
+        if (!image) {
+            image = [self localVideoPreviewImageForWidth:width height:height];
+        }
+        if (!image && self.lastPreviewImage) {
+            image = self.lastPreviewImage;
+        }
+        if (!image && self.lastPhotoImage) {
+            image = self.lastPhotoImage;
+        }
+        if (!image) {
+            return self.lastJPEGData;
+        }
+
+        CGRect extent = image.extent;
+        if (CGRectIsEmpty(extent)) {
+            return self.lastJPEGData;
+        }
+
+        CIImage *normalized = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+        NSData *jpeg = [self JPEGFromImage:normalized
+                                     width:width
+                                    height:height
+                               orientation:nil
+                                colorSpace:colorSpace];
+        if (colorSpace) {
+            CGColorSpaceRelease(colorSpace);
+        }
+        return jpeg ?: self.lastJPEGData;
+    }
+}
+
 - (nullable NSData *)latestJPEGDataMatchingPhotoData:(NSData *)photoData {
     @synchronized (self) {
         if (![self isVirtualCameraEnabled] || !self.lastPhotoImage) {
@@ -739,6 +793,71 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     CGImageRelease(cgImage);
 
     return ok ? data : nil;
+}
+
+- (nullable CIImage *)rawFramePreviewImageForWidth:(size_t)targetWidth height:(size_t)targetHeight {
+    int width = 0;
+    int height = 0;
+    int fps = 0;
+    [self readWidth:&width height:&height fps:&fps];
+    if (width <= 0 || height <= 0) {
+        return nil;
+    }
+
+    NSData *frameData = [NSData dataWithContentsOfFile:kVCamFramePath options:NSDataReadingMappedIfSafe error:nil];
+    NSUInteger expected = (NSUInteger)width * (NSUInteger)height * 4;
+    if (!frameData || frameData.length < expected) {
+        return nil;
+    }
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CIImage *image = [[CIImage alloc] initWithBitmapData:frameData
+                                             bytesPerRow:(size_t)width * 4
+                                                    size:CGSizeMake(width, height)
+                                                  format:kCIFormatBGRA8
+                                              colorSpace:colorSpace];
+    if (colorSpace) {
+        CGColorSpaceRelease(colorSpace);
+    }
+    if (!image) {
+        return nil;
+    }
+
+    return [self image:image byApplyingQuarterTurns:[self previewQuarterTurnsForImage:image targetWidth:targetWidth targetHeight:targetHeight]];
+}
+
+- (nullable CIImage *)localVideoPreviewImageForWidth:(size_t)targetWidth height:(size_t)targetHeight {
+    NSURL *url = [self currentVideoURL];
+    if (!url) {
+        [self resetLocalVideoReader];
+        return nil;
+    }
+
+    BOOL needsReload = !self.assetReader ||
+                       ![self.activeVideoURL isEqual:url] ||
+                       self.assetReader.status == AVAssetReaderStatusFailed ||
+                       self.assetReader.status == AVAssetReaderStatusCancelled ||
+                       self.assetReader.status == AVAssetReaderStatusCompleted;
+    if (needsReload) {
+        [self configureLocalVideoReaderAtURL:url];
+    }
+
+    CMSampleBufferRef sample = [self.videoOutput copyNextSampleBuffer];
+    if (!sample) {
+        [self configureLocalVideoReaderAtURL:url];
+        sample = [self.videoOutput copyNextSampleBuffer];
+    }
+    if (!sample) {
+        return nil;
+    }
+
+    CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sample);
+    CIImage *image = nil;
+    if (imageBuffer) {
+        image = [self previewImageFromSourceImage:imageBuffer targetWidth:targetWidth targetHeight:targetHeight];
+    }
+    CFRelease(sample);
+    return image;
 }
 
 - (CIContext *)sharedCIContext {

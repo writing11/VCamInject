@@ -1,4 +1,5 @@
 #import <CoreMedia/CoreMedia.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -11,7 +12,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)disableVirtualCamera;
 - (BOOL)isVirtualCameraEnabled;
 - (BOOL)hasLocalVideo;
+- (BOOL)hasAnyVirtualSource;
 - (nullable NSData *)latestJPEGData;
+- (nullable NSData *)previewJPEGDataForSize:(CGSize)size;
 - (nullable NSData *)latestJPEGDataMatchingPhotoData:(NSData *)photoData;
 @end
 
