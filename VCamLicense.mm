@@ -226,12 +226,12 @@ static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.devic
 
     if (parts.count >= 3) {
         prefix = parts[0];
-        expiry = parts[1];
+        expiry = [self normalizedLicenseText:parts[1]];
         for (NSUInteger i = 2; i < parts.count; i++) {
-            [signature appendString:[self normalizedAlphaNumeric:parts[i]]];
+            [signature appendString:[self normalizedLicenseText:parts[i]]];
         }
     } else {
-        NSString *compact = [self normalizedAlphaNumeric:upper];
+        NSString *compact = [self normalizedLicenseText:upper];
         if (compact.length >= 22 && [[compact substringToIndex:2] isEqualToString:@"YP"]) {
             prefix = @"YP";
             expiry = @"PERM";
@@ -292,8 +292,31 @@ static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.devic
 
 - (NSString *)expectedSignatureForPrefix:(NSString *)prefix expiry:(NSString *)expiry {
     NSString *message = [NSString stringWithFormat:@"VCAM|v2|%@|%@|%@", [self rawDeviceCode], prefix, expiry];
-    NSString *hmac = [self hmacSHA256HexForMessage:message];
-    return [[hmac substringToIndex:16] uppercaseString];
+    NSData *digest = [self hmacSHA256DataForMessage:message];
+    return [self safeSignatureFromDigest:digest length:16];
+}
+
+- (NSData *)hmacSHA256DataForMessage:(NSString *)message {
+    NSData *keyData = [kVCamLicenseSecret dataUsingEncoding:NSUTF8StringEncoding];
+    NSData *messageData = [message dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CCHmac(kCCHmacAlgSHA256, keyData.bytes, keyData.length, messageData.bytes, messageData.length, digest);
+    return [NSData dataWithBytes:digest length:CC_SHA256_DIGEST_LENGTH];
+}
+
+- (NSString *)safeSignatureFromDigest:(NSData *)digest length:(NSUInteger)length {
+    static const char alphabet[] = "23456789ABCDEFGH";
+    const unsigned char *bytes = (const unsigned char *)digest.bytes;
+    NSMutableString *out = [NSMutableString stringWithCapacity:length];
+    for (NSUInteger i = 0; i < digest.length && out.length < length; i++) {
+        unsigned char b = bytes[i];
+        [out appendFormat:@"%c", alphabet[(b >> 4) & 0x0F]];
+        if (out.length >= length) {
+            break;
+        }
+        [out appendFormat:@"%c", alphabet[b & 0x0F]];
+    }
+    return out;
 }
 
 - (NSString *)hmacSHA256HexForMessage:(NSString *)message {
@@ -365,6 +388,23 @@ static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.devic
         }
     }
     return result.uppercaseString;
+}
+
+- (NSString *)normalizedLicenseText:(NSString *)text {
+    NSMutableString *normalized = [[self normalizedAlphaNumeric:text] mutableCopy];
+    [normalized replaceOccurrencesOfString:@"O"
+                                withString:@"0"
+                                   options:0
+                                     range:NSMakeRange(0, normalized.length)];
+    [normalized replaceOccurrencesOfString:@"I"
+                                withString:@"1"
+                                   options:0
+                                     range:NSMakeRange(0, normalized.length)];
+    [normalized replaceOccurrencesOfString:@"L"
+                                withString:@"1"
+                                   options:0
+                                     range:NSMakeRange(0, normalized.length)];
+    return normalized;
 }
 
 @end
