@@ -6,6 +6,7 @@ RootHide/rootless iOS camera replacement tweak.
 
 - Injects into apps that use `AVCaptureVideoDataOutput`, `AVCaptureVideoPreviewLayer`, or `AVCapturePhoto`.
 - Covers `AVCaptureVideoPreviewLayer` with the current virtual source so apps do not keep showing the real camera preview while receiving replaced frames.
+- The preview overlay stays hidden until a real virtual frame is ready, preventing black screenshots/photos in apps that capture the preview layer.
 - Replaces camera sample buffers with a selected video.
 - Two-finger quick double tap shows or hides a small floating red `Y` button.
 - Tap the floating button to open the control menu.

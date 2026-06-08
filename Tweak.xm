@@ -103,7 +103,7 @@ static CALayer *VCamOverlayLayerForPreview(AVCaptureVideoPreviewLayer *previewLa
         overlay.masksToBounds = YES;
         overlay.hidden = YES;
         overlay.contentsGravity = kCAGravityResizeAspectFill;
-        overlay.backgroundColor = UIColor.blackColor.CGColor;
+        overlay.backgroundColor = UIColor.clearColor.CGColor;
         [previewLayer addSublayer:overlay];
         objc_setAssociatedObject(previewLayer, kVCamPreviewOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -170,10 +170,10 @@ static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer) {
         return;
     }
 
-    overlay.hidden = NO;
     CGSize size = previewLayer.bounds.size;
     NSData *jpeg = [provider previewJPEGDataForSize:size];
     if (jpeg.length == 0) {
+        overlay.hidden = YES;
         overlay.contents = nil;
         return;
     }
@@ -181,7 +181,11 @@ static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer) {
     CGImageRef image = VCamCreateDisplayCGImageFromJPEG(jpeg);
     if (image) {
         overlay.contents = (__bridge id)image;
+        overlay.hidden = NO;
         CGImageRelease(image);
+    } else {
+        overlay.hidden = YES;
+        overlay.contents = nil;
     }
 }
 

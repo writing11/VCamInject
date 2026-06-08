@@ -91,7 +91,7 @@
     }
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
-                                                                   message:VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236\n\u9884\u89c8\u540c\u6b65\u7248")
+                                                                   message:VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236\n\u9ed1\u56fe\u4fee\u590d\u7248")
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9009\u62e9\u89c6\u9891\u5e76\u66ff\u6362")

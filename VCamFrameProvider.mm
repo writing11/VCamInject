@@ -584,6 +584,9 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         if (![self isVirtualCameraEnabled]) {
             return nil;
         }
+        if (size.width < 2.0 || size.height < 2.0) {
+            return nil;
+        }
 
         size_t width = (size_t)MAX(1.0, floor(size.width));
         size_t height = (size_t)MAX(1.0, floor(size.height));
@@ -598,16 +601,18 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
             image = self.lastPhotoImage;
         }
         if (!image) {
-            return self.lastJPEGData;
+            return nil;
         }
 
         CGRect extent = image.extent;
         if (CGRectIsEmpty(extent)) {
-            return self.lastJPEGData;
+            return nil;
         }
 
         CIImage *normalized = [image imageByApplyingTransform:CGAffineTransformMakeTranslation(-CGRectGetMinX(extent), -CGRectGetMinY(extent))];
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+        BOOL prefersPortrait = CGRectGetHeight(normalized.extent) > CGRectGetWidth(normalized.extent);
+        [self updateLatestJPEGFromDisplayImage:normalized previewImage:normalized prefersPortrait:prefersPortrait colorSpace:colorSpace];
         NSData *jpeg = [self JPEGFromImage:normalized
                                      width:width
                                     height:height
@@ -616,7 +621,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         if (colorSpace) {
             CGColorSpaceRelease(colorSpace);
         }
-        return jpeg ?: self.lastJPEGData;
+        return jpeg;
     }
 }
 
