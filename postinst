@@ -1,7 +1,26 @@
 #!/bin/sh
 set -e
 
-mkdir -p /var/mobile/Library/VCam
+VCAM_DIR="/var/mobile/Library/VCam"
+DEVICE_ID="$VCAM_DIR/device.id"
+LICENSE_KEY="$VCAM_DIR/license.key"
+
+mkdir -p "$VCAM_DIR"
+
+if [ ! -s "$DEVICE_ID" ]; then
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen | tr -d '-' | tr '[:lower:]' '[:upper:]' > "$DEVICE_ID"
+    else
+        date +%s | awk '{print "VCAM" $1 "DEVICEID"}' > "$DEVICE_ID"
+    fi
+fi
+
+chown -R mobile:mobile "$VCAM_DIR" >/dev/null 2>&1 || true
+chmod 0777 "$VCAM_DIR" >/dev/null 2>&1 || true
+chmod 0666 "$DEVICE_ID" >/dev/null 2>&1 || true
+if [ -f "$LICENSE_KEY" ]; then
+    chmod 0666 "$LICENSE_KEY" >/dev/null 2>&1 || true
+fi
 
 PLIST="/var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist"
 if [ ! -f "$PLIST" ]; then

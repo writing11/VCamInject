@@ -2,6 +2,8 @@
 
 #import <CommonCrypto/CommonDigest.h>
 #import <CommonCrypto/CommonHMAC.h>
+#import <dlfcn.h>
+#import <sys/stat.h>
 
 static NSString * const kVCamLicenseDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
@@ -71,7 +73,11 @@ static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026"
 
     NSString *canonical = [self canonicalCodeForLicense:license];
     [self ensureLicenseDirectory];
-    return [canonical writeToFile:kVCamLicensePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    BOOL ok = [canonical writeToFile:kVCamLicensePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    if (ok) {
+        chmod(kVCamLicensePath.UTF8String, 0666);
+    }
+    return ok;
 }
 
 - (void)clearActivation {
@@ -87,9 +93,18 @@ static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026"
         return normalized;
     }
 
+    NSString *systemCode = [self stableSystemDeviceCode];
+    if (systemCode.length >= 16) {
+        [self saveDeviceCodeIfPossible:systemCode];
+        return systemCode;
+    }
+
     NSString *generated = [self normalizedAlphaNumeric:NSUUID.UUID.UUIDString];
-    [generated writeToFile:kVCamDevicePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    return generated;
+    if ([self saveDeviceCodeIfPossible:generated]) {
+        return generated;
+    }
+
+    return @"VCAMDEVICEIDNOTSAVED000000000";
 }
 
 - (void)ensureLicenseDirectory {
@@ -97,6 +112,67 @@ static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026"
                             withIntermediateDirectories:YES
                                              attributes:nil
                                                   error:nil];
+    chmod(kVCamLicenseDir.UTF8String, 0777);
+}
+
+- (BOOL)saveDeviceCodeIfPossible:(NSString *)deviceCode {
+    if (deviceCode.length < 16) {
+        return NO;
+    }
+
+    [self ensureLicenseDirectory];
+    BOOL ok = [deviceCode writeToFile:kVCamDevicePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    if (!ok) {
+        return NO;
+    }
+
+    chmod(kVCamDevicePath.UTF8String, 0666);
+    NSString *saved = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
+    return [[self normalizedAlphaNumeric:saved] isEqualToString:deviceCode];
+}
+
+- (NSString *)stableSystemDeviceCode {
+    typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
+    void *handle = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
+    if (!handle) {
+        return nil;
+    }
+
+    MGCopyAnswerFunc copyAnswer = (MGCopyAnswerFunc)dlsym(handle, "MGCopyAnswer");
+    if (!copyAnswer) {
+        return nil;
+    }
+
+    NSArray<NSString *> *keys = @[@"UniqueDeviceID", @"SerialNumber", @"UniqueChipID"];
+    NSMutableString *material = [NSMutableString string];
+    for (NSString *key in keys) {
+        CFTypeRef answer = copyAnswer((__bridge CFStringRef)key);
+        if (!answer) {
+            continue;
+        }
+        [material appendFormat:@"%@|", (__bridge id)answer];
+        CFRelease(answer);
+    }
+
+    NSString *normalized = [self normalizedAlphaNumeric:material];
+    if (normalized.length < 8) {
+        return nil;
+    }
+
+    NSString *hash = [self sha256HexForText:[NSString stringWithFormat:@"VCAMDEVICE|%@", normalized]];
+    return [[hash substringToIndex:32] uppercaseString];
+}
+
+- (NSString *)sha256HexForText:(NSString *)text {
+    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+
+    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (NSUInteger i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+        [hex appendFormat:@"%02x", digest[i]];
+    }
+    return hex;
 }
 
 - (VCamParsedLicense *)parsedLicenseFromStoredCode {

@@ -48,6 +48,14 @@ This build uses offline activation. It does not need a server.
 
 The 7-day and 1-month codes include an expiry date. Permanent codes do not expire.
 
+The device code is created once during package installation at:
+
+```text
+/var/mobile/Library/VCam/device.id
+```
+
+If the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions.
+
 ## Priority order
 
 The tweak uses sources in this order:
