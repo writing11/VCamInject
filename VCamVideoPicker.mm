@@ -1,5 +1,6 @@
 #import "VCamVideoPicker.h"
 #import "VCamFrameProvider.h"
+#import "VCamLicense.h"
 
 #import <PhotosUI/PhotosUI.h>
 
@@ -90,8 +91,14 @@
         return;
     }
 
+    if (![[VCamLicense sharedLicense] isActivated]) {
+        [self showActivationMenuFromController:top];
+        return;
+    }
+
+    NSString *status = [[VCamLicense sharedLicense] activationStatusText];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
-                                                                   message:VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236\n\u9ed1\u56fe\u4fee\u590d\u7248")
+                                                                   message:[NSString stringWithFormat:@"%@\n%@", VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236"), status]
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9009\u62e9\u89c6\u9891\u5e76\u66ff\u6362")
@@ -139,6 +146,11 @@
         return;
     }
 
+    if (![[VCamLicense sharedLicense] isActivated]) {
+        [self showActivationMenuFromController:top];
+        return;
+    }
+
     if (@available(iOS 14.0, *)) {
         PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
         config.selectionLimit = 1;
@@ -153,6 +165,76 @@
     } else {
         [self showMessage:VCamText("\u9700\u8981 iOS 14 \u6216\u66f4\u65b0\u7248\u672c") from:top];
     }
+}
+
+- (void)showActivationMenuFromController:(UIViewController *)controller {
+    VCamLicense *license = [VCamLicense sharedLicense];
+    NSString *message = [NSString stringWithFormat:@"%@\n\n%@\n%@",
+                         VCamText("\u6b64\u7248\u672c\u9700\u8981\u6fc0\u6d3b\u540e\u624d\u80fd\u4f7f\u7528"),
+                         VCamText("\u8bbe\u5907\u7801\uff1a"),
+                         [license deviceCode]];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u8f93\u5165\u6fc0\u6d3b\u7801")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showActivationInputFromController:controller];
+        });
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u590d\u5236\u8bbe\u5907\u7801")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = [license deviceCode];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showMessage:VCamText("\u8bbe\u5907\u7801\u5df2\u590d\u5236") from:controller];
+        });
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u53d6\u6d88")
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
+    [controller presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)showActivationInputFromController:(UIViewController *)controller {
+    NSString *deviceCode = [[VCamLicense sharedLicense] deviceCode];
+    NSString *message = [NSString stringWithFormat:@"%@\n%@",
+                         VCamText("\u8bbe\u5907\u7801\uff1a"),
+                         deviceCode];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:VCamText("\u8f93\u5165\u6fc0\u6d3b\u7801")
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = @"Y7 / Y1 / YP";
+        textField.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
+        textField.autocorrectionType = UITextAutocorrectionTypeNo;
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u6fc0\u6d3b")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        NSString *code = alert.textFields.firstObject.text ?: @"";
+        BOOL ok = [[VCamLicense sharedLicense] activateWithCode:code];
+        NSString *result = ok ? [NSString stringWithFormat:@"%@\n%@", VCamText("\u6fc0\u6d3b\u6210\u529f"), [[VCamLicense sharedLicense] activationStatusText]]
+                              : VCamText("\u6fc0\u6d3b\u7801\u65e0\u6548\u6216\u5df2\u8fc7\u671f");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showMessage:result from:controller];
+        });
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u53d6\u6d88")
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
+    [controller presentViewController:alert animated:YES completion:nil];
 }
 
 - (UIViewController *)topControllerForWindow:(UIWindow *)window {

@@ -14,15 +14,17 @@ RootHide/rootless iOS camera replacement tweak.
 - `Restore real camera` disables replacement and returns the app to the real camera.
 - Uses `PHPickerViewController`, so it avoids the common crash caused by host apps missing `NSPhotoLibraryUsageDescription`.
 - Includes `vcamreceiverd`, a phone-side daemon that listens on TCP port `9999` for the Windows sender handshake.
+- Adds offline activation. Camera replacement is blocked until the device is activated.
 
 ## Phone controls
 
 1. Open the target app camera page.
 2. Tap the screen twice quickly with exactly two fingers.
 3. A floating red `Y` button appears.
-4. Tap `VCam`.
-5. Choose `Choose video and replace`.
-6. Pick a video from the phone album.
+4. Tap `Y`.
+5. If the device is not activated, copy the device code and enter an activation code.
+6. After activation, choose `Choose video and replace`.
+7. Pick a video from the phone album.
 
 The selected video is copied into the app temporary directory and is used immediately. There is no separate enable button.
 
@@ -30,6 +32,21 @@ To restore the real camera:
 
 1. Tap the floating red `Y` button.
 2. Choose `Restore real camera`.
+
+## Activation
+
+This build uses offline activation. It does not need a server.
+
+1. Open the floating red `Y` button.
+2. The phone shows a device code when it is not activated.
+3. Use `VCamKeygen.py` or `VCamKeygen.exe` on Windows to generate an activation code.
+4. Supported activation types:
+
+- `7天`
+- `1个月`
+- `永久`
+
+The 7-day and 1-month codes include an expiry date. Permanent codes do not expire.
 
 ## Priority order
 
@@ -75,6 +92,8 @@ Upload the whole source folder to GitHub, including:
 - `VCamFrameProvider.mm`
 - `VCamVideoPicker.h`
 - `VCamVideoPicker.mm`
+- `VCamLicense.h`
+- `VCamLicense.mm`
 - `VCamInject.plist`
 - `vcamreceiverd.c`
 - `control`

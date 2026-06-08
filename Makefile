@@ -4,7 +4,7 @@ TARGET := iphone:clang:latest:14.0
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = VCamInject
-VCamInject_FILES = Tweak.xm VCamFrameProvider.mm VCamVideoPicker.mm
+VCamInject_FILES = Tweak.xm VCamFrameProvider.mm VCamVideoPicker.mm VCamLicense.mm
 VCamInject_CFLAGS = -fobjc-arc -Wall -Wextra
 VCamInject_CCFLAGS = -std=gnu++14
 VCamInject_CXXFLAGS = -std=gnu++14

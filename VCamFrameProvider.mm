@@ -1,4 +1,5 @@
 #import "VCamFrameProvider.h"
+#import "VCamLicense.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
@@ -208,6 +209,9 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 }
 
 - (BOOL)isVirtualCameraEnabled {
+    if (![[VCamLicense sharedLicense] isActivated]) {
+        return NO;
+    }
     if (self.disabledInProcess) {
         return NO;
     }
