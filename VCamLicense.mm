@@ -2,6 +2,7 @@
 
 #import <CommonCrypto/CommonDigest.h>
 #import <CommonCrypto/CommonHMAC.h>
+#import <UIKit/UIKit.h>
 #import <dlfcn.h>
 #import <sys/stat.h>
 
@@ -9,6 +10,7 @@ static NSString * const kVCamLicenseDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
 static NSString * const kVCamLicensePath = @"/var/mobile/Library/VCam/license.key";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
+static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.device.id";
 
 @interface VCamParsedLicense : NSObject
 @property (nonatomic, copy) NSString *prefix;
@@ -93,18 +95,26 @@ static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026"
         return normalized;
     }
 
+    NSString *appStored = [self normalizedAlphaNumeric:[NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsDeviceKey]];
+    if (appStored.length >= 16) {
+        [self saveDeviceCodeIfPossible:appStored];
+        return appStored;
+    }
+
     NSString *systemCode = [self stableSystemDeviceCode];
     if (systemCode.length >= 16) {
         [self saveDeviceCodeIfPossible:systemCode];
+        [self saveAppDeviceCode:systemCode];
         return systemCode;
     }
 
     NSString *generated = [self normalizedAlphaNumeric:NSUUID.UUID.UUIDString];
+    [self saveAppDeviceCode:generated];
     if ([self saveDeviceCodeIfPossible:generated]) {
         return generated;
     }
 
-    return @"VCAMDEVICEIDNOTSAVED000000000";
+    return generated;
 }
 
 - (void)ensureLicenseDirectory {
@@ -131,27 +141,45 @@ static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026"
     return [[self normalizedAlphaNumeric:saved] isEqualToString:deviceCode];
 }
 
+- (void)saveAppDeviceCode:(NSString *)deviceCode {
+    if (deviceCode.length < 16) {
+        return;
+    }
+
+    [NSUserDefaults.standardUserDefaults setObject:deviceCode forKey:kVCamDefaultsDeviceKey];
+    [NSUserDefaults.standardUserDefaults synchronize];
+}
+
 - (NSString *)stableSystemDeviceCode {
     typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
     void *handle = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
-    if (!handle) {
-        return nil;
-    }
+    MGCopyAnswerFunc copyAnswer = handle ? (MGCopyAnswerFunc)dlsym(handle, "MGCopyAnswer") : NULL;
 
-    MGCopyAnswerFunc copyAnswer = (MGCopyAnswerFunc)dlsym(handle, "MGCopyAnswer");
-    if (!copyAnswer) {
-        return nil;
-    }
-
-    NSArray<NSString *> *keys = @[@"UniqueDeviceID", @"SerialNumber", @"UniqueChipID"];
     NSMutableString *material = [NSMutableString string];
-    for (NSString *key in keys) {
-        CFTypeRef answer = copyAnswer((__bridge CFStringRef)key);
-        if (!answer) {
-            continue;
+
+    NSArray<NSString *> *keys = @[
+        @"UniqueDeviceID",
+        @"re6Zb+zwFKJNlkQTUeT+/w",
+        @"SerialNumber",
+        @"VasUgeSzVyHdB27g2XpN0g",
+        @"UniqueChipID",
+        @"aK5A62T7R++lRD3kS+oCfg"
+    ];
+
+    if (copyAnswer) {
+        for (NSString *key in keys) {
+            CFTypeRef answer = copyAnswer((__bridge CFStringRef)key);
+            if (!answer) {
+                continue;
+            }
+            [material appendFormat:@"%@|", (__bridge id)answer];
+            CFRelease(answer);
         }
-        [material appendFormat:@"%@|", (__bridge id)answer];
-        CFRelease(answer);
+    }
+
+    NSString *vendor = UIDevice.currentDevice.identifierForVendor.UUIDString;
+    if (vendor.length > 0) {
+        [material appendFormat:@"IFV:%@|", vendor];
     }
 
     NSString *normalized = [self normalizedAlphaNumeric:material];

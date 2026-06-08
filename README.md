@@ -54,7 +54,7 @@ The device code is created once during package installation at:
 /var/mobile/Library/VCam/device.id
 ```
 
-If the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions.
+If every phone shows the same device code or the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions. This version also falls back to per-device system information and app-local storage instead of showing a shared fallback code.
 
 ## Priority order
 

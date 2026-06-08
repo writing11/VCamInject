@@ -7,11 +7,18 @@ LICENSE_KEY="$VCAM_DIR/license.key"
 
 mkdir -p "$VCAM_DIR"
 
-if [ ! -s "$DEVICE_ID" ]; then
-    if command -v uuidgen >/dev/null 2>&1; then
+CURRENT_DEVICE_ID=""
+if [ -f "$DEVICE_ID" ]; then
+    CURRENT_DEVICE_ID="$(tr -cd '[:alnum:]' < "$DEVICE_ID" | tr '[:lower:]' '[:upper:]')"
+fi
+
+if [ ${#CURRENT_DEVICE_ID} -lt 16 ] || echo "$CURRENT_DEVICE_ID" | grep -q '^VCAMDEVICEIDNOTSAVED'; then
+    if [ -r /dev/urandom ]; then
+        od -An -N16 -tx1 /dev/urandom | tr -d ' \n' | tr '[:lower:]' '[:upper:]' > "$DEVICE_ID"
+    elif command -v uuidgen >/dev/null 2>&1; then
         uuidgen | tr -d '-' | tr '[:lower:]' '[:upper:]' > "$DEVICE_ID"
     else
-        date +%s | awk '{print "VCAM" $1 "DEVICEID"}' > "$DEVICE_ID"
+        date +%s%N | awk '{print "VCAM" $1 "DEVICEID"}' > "$DEVICE_ID"
     fi
 fi
 
