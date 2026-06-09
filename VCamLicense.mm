@@ -13,6 +13,7 @@ static NSString * const kVCamLicensePath = @"/var/mobile/Library/VCam/license.ke
 static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.start";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.device.id";
+static NSString * const kVCamDefaultsLicenseKey = @"com.qianmian.vcaminject.license.key";
 static NSString * const kVCamDefaultsTrialStartKey = @"com.qianmian.vcaminject.trial.start";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static NSString *gVCamCachedDeviceCode = nil;
@@ -118,15 +119,21 @@ static NSString *gVCamCachedDeviceCode = nil;
 
     NSString *canonical = [self canonicalCodeForLicense:license];
     [self ensureLicenseDirectory];
-    BOOL ok = [canonical writeToFile:kVCamLicensePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    if (ok) {
+    BOOL fileOK = [canonical writeToFile:kVCamLicensePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    if (fileOK) {
         chmod(kVCamLicensePath.UTF8String, 0666);
     }
-    return ok;
+
+    [NSUserDefaults.standardUserDefaults setObject:canonical forKey:kVCamDefaultsLicenseKey];
+    BOOL defaultsOK = [NSUserDefaults.standardUserDefaults synchronize];
+    NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsLicenseKey];
+    return fileOK || defaultsOK || [saved isEqualToString:canonical];
 }
 
 - (void)clearActivation {
     [NSFileManager.defaultManager removeItemAtPath:kVCamLicensePath error:nil];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:kVCamDefaultsLicenseKey];
+    [NSUserDefaults.standardUserDefaults synchronize];
 }
 
 - (NSString *)rawDeviceCode {
@@ -303,7 +310,13 @@ static NSString *gVCamCachedDeviceCode = nil;
 
 - (VCamParsedLicense *)parsedLicenseFromStoredCode {
     NSString *stored = [NSString stringWithContentsOfFile:kVCamLicensePath encoding:NSUTF8StringEncoding error:nil];
-    return [self parseActivationCode:stored];
+    VCamParsedLicense *license = [self parseActivationCode:stored];
+    if (license) {
+        return license;
+    }
+
+    NSString *defaultsStored = [NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsLicenseKey];
+    return [self parseActivationCode:defaultsStored];
 }
 
 - (VCamParsedLicense *)parseActivationCode:(NSString *)code {

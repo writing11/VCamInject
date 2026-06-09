@@ -23,15 +23,13 @@ if [ ${#CURRENT_DEVICE_ID} -lt 16 ] || echo "$CURRENT_DEVICE_ID" | grep -q '^VCA
     fi
 fi
 
+touch "$LICENSE_KEY" "$TRIAL_START" >/dev/null 2>&1 || true
+
 chown -R mobile:mobile "$VCAM_DIR" >/dev/null 2>&1 || true
 chmod 0777 "$VCAM_DIR" >/dev/null 2>&1 || true
 chmod 0666 "$DEVICE_ID" >/dev/null 2>&1 || true
-if [ -f "$LICENSE_KEY" ]; then
-    chmod 0666 "$LICENSE_KEY" >/dev/null 2>&1 || true
-fi
-if [ -f "$TRIAL_START" ]; then
-    chmod 0666 "$TRIAL_START" >/dev/null 2>&1 || true
-fi
+chmod 0666 "$LICENSE_KEY" >/dev/null 2>&1 || true
+chmod 0666 "$TRIAL_START" >/dev/null 2>&1 || true
 
 PLIST="/var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist"
 if [ ! -f "$PLIST" ]; then
