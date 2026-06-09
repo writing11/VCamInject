@@ -410,7 +410,6 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
     }
 
     CIImage *image = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
-    CGRect src = image.extent;
     CIImage *scaled = [self image:image scaledToOutputWidth:dstWidth height:dstHeight applyUserScale:YES];
 
     CIContext *context = [self sharedCIContext];
