@@ -398,6 +398,28 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
 - (NSURL *)copyPickedVideoToStableTempURL:(NSURL *)url preferredType:(NSString *)typeIdentifier {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *ext = url.pathExtension.length > 0 ? url.pathExtension.lowercaseString : [self extensionForType:typeIdentifier];
+    NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"VCamSelected"];
+    [fm createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    for (NSString *oldExt in @[@"mp4", @"mov", @"m4v", @"avi"]) {
+        [fm removeItemAtPath:[tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"selected.%@", oldExt]] error:nil];
+    }
+
+    NSString *tempPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"selected.%@", ext]];
+    NSURL *tempURL = [NSURL fileURLWithPath:tempPath];
+    [fm removeItemAtURL:tempURL error:nil];
+
+    if (![fm copyItemAtURL:url toURL:tempURL error:nil]) {
+        return nil;
+    }
+    chmod(tempPath.UTF8String, 0666);
+
+    [self copyLocalVideoAtURLToSharedSource:tempURL extension:ext];
+    return tempURL;
+}
+
+- (void)copyLocalVideoAtURLToSharedSource:(NSURL *)localURL extension:(NSString *)ext {
+    NSFileManager *fm = NSFileManager.defaultManager;
     NSString *dir = kVCamSharedDir;
     [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     chmod(dir.UTF8String, 0777);
@@ -411,13 +433,9 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
     NSURL *targetURL = [NSURL fileURLWithPath:targetPath];
     [fm removeItemAtURL:targetURL error:nil];
 
-    NSError *copyError = nil;
-    if ([fm copyItemAtURL:url toURL:targetURL error:&copyError]) {
+    if ([fm copyItemAtURL:localURL toURL:targetURL error:nil]) {
         chmod(targetPath.UTF8String, 0666);
-        return targetURL;
     }
-
-    return nil;
 }
 
 - (NSString *)extensionForType:(NSString *)typeIdentifier {

@@ -27,7 +27,7 @@ RootHide/rootless iOS camera replacement tweak.
 6. After the trial ends, copy the device code and enter an activation code.
 7. Pick a video from the phone album.
 
-The selected video is copied into `/var/mobile/Library/VCam/source.*` and is used immediately. All injected apps share the same selected video. There is no separate enable button.
+The selected video is copied into the current app's stable temporary path first, so it takes effect immediately after selection. The tweak also tries to sync a shared copy to `/var/mobile/Library/VCam/source.*` for other injected apps. There is no separate enable button.
 
 To restore the real camera:
 

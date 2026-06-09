@@ -186,7 +186,7 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
     @synchronized (self) {
     self.selectedVideoURL = url;
     self.disabledInProcess = NO;
-    self.activationTime = [NSDate timeIntervalSinceReferenceDate] + 1.2;
+    self.activationTime = [NSDate timeIntervalSinceReferenceDate] + 0.15;
     [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
     [self resetLocalVideoReader];
     }
@@ -220,6 +220,9 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
     }
     if (self.activationTime > 0 && [NSDate timeIntervalSinceReferenceDate] < self.activationTime) {
         return NO;
+    }
+    if (self.selectedVideoURL) {
+        return YES;
     }
     return ![NSFileManager.defaultManager fileExistsAtPath:kVCamDisabledPath];
 }
