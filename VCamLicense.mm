@@ -15,6 +15,7 @@ static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026"
 static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.device.id";
 static NSString * const kVCamDefaultsTrialStartKey = @"com.qianmian.vcaminject.trial.start";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
+static NSString *gVCamCachedDeviceCode = nil;
 
 @interface VCamParsedLicense : NSObject
 @property (nonatomic, copy) NSString *prefix;
@@ -129,34 +130,49 @@ static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 }
 
 - (NSString *)rawDeviceCode {
+    NSString *cached = [self normalizedAlphaNumeric:gVCamCachedDeviceCode];
+    if (cached.length >= 16) {
+        return cached;
+    }
+
     [self ensureLicenseDirectory];
 
     NSString *stored = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
     NSString *normalized = [self normalizedAlphaNumeric:stored];
     if (normalized.length >= 16) {
-        return normalized;
+        return [self cacheAndReturnDeviceCode:normalized];
     }
 
     NSString *appStored = [self normalizedAlphaNumeric:[NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsDeviceKey]];
     if (appStored.length >= 16) {
         [self saveDeviceCodeIfPossible:appStored];
-        return appStored;
+        return [self cacheAndReturnDeviceCode:appStored];
     }
 
     NSString *systemCode = [self stableSystemDeviceCode];
     if (systemCode.length >= 16) {
         [self saveDeviceCodeIfPossible:systemCode];
         [self saveAppDeviceCode:systemCode];
-        return systemCode;
+        return [self cacheAndReturnDeviceCode:systemCode];
     }
 
     NSString *generated = [self normalizedAlphaNumeric:NSUUID.UUID.UUIDString];
     [self saveAppDeviceCode:generated];
     if ([self saveDeviceCodeIfPossible:generated]) {
-        return generated;
+        return [self cacheAndReturnDeviceCode:generated];
     }
 
-    return generated;
+    return [self cacheAndReturnDeviceCode:generated];
+}
+
+- (NSString *)cacheAndReturnDeviceCode:(NSString *)deviceCode {
+    NSString *normalized = [self normalizedAlphaNumeric:deviceCode];
+    if (normalized.length >= 16) {
+        @synchronized (VCamLicense.class) {
+            gVCamCachedDeviceCode = [normalized copy];
+        }
+    }
+    return normalized;
 }
 
 - (void)ensureLicenseDirectory {
@@ -356,8 +372,19 @@ static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
         return NO;
     }
 
-    NSString *expected = [self expectedSignatureForPrefix:license.prefix expiry:license.expiry];
-    return [license.signature isEqualToString:expected];
+    for (NSString *device in [self deviceCodeCandidatesForSigning]) {
+        NSString *expected = [self expectedSignatureForDevice:device prefix:license.prefix expiry:license.expiry];
+        if ([license.signature isEqualToString:expected]) {
+            return YES;
+        }
+
+        NSString *legacy = [self legacyHexSignatureForDevice:device prefix:license.prefix expiry:license.expiry];
+        if ([license.signature isEqualToString:legacy]) {
+            return YES;
+        }
+    }
+
+    return NO;
 }
 
 - (BOOL)isParsedLicenseExpired:(VCamParsedLicense *)license {
@@ -373,9 +400,48 @@ static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 }
 
 - (NSString *)expectedSignatureForPrefix:(NSString *)prefix expiry:(NSString *)expiry {
-    NSString *message = [NSString stringWithFormat:@"VCAM|v2|%@|%@|%@", [self rawDeviceCode], prefix, expiry];
+    return [self expectedSignatureForDevice:[self rawDeviceCode] prefix:prefix expiry:expiry];
+}
+
+- (NSString *)expectedSignatureForDevice:(NSString *)deviceCode prefix:(NSString *)prefix expiry:(NSString *)expiry {
+    NSString *device = [self normalizedDeviceCodeForSigning:deviceCode];
+    NSString *message = [NSString stringWithFormat:@"VCAM|v2|%@|%@|%@", device, prefix, expiry];
     NSData *digest = [self hmacSHA256DataForMessage:message];
     return [self safeSignatureFromDigest:digest length:16];
+}
+
+- (NSString *)legacyHexSignatureForPrefix:(NSString *)prefix expiry:(NSString *)expiry {
+    return [self legacyHexSignatureForDevice:[self rawDeviceCode] prefix:prefix expiry:expiry];
+}
+
+- (NSString *)legacyHexSignatureForDevice:(NSString *)deviceCode prefix:(NSString *)prefix expiry:(NSString *)expiry {
+    NSString *device = [self normalizedDeviceCodeForSigning:deviceCode];
+    NSString *message = [NSString stringWithFormat:@"VCAM|v2|%@|%@|%@", device, prefix, expiry];
+    NSString *hmac = [self hmacSHA256HexForMessage:message];
+    return [[hmac substringToIndex:16] uppercaseString];
+}
+
+- (NSArray<NSString *> *)deviceCodeCandidatesForSigning {
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+
+    [self addDeviceCodeCandidate:gVCamCachedDeviceCode toArray:candidates seen:seen];
+    [self addDeviceCodeCandidate:[self rawDeviceCode] toArray:candidates seen:seen];
+    [self addDeviceCodeCandidate:[NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil] toArray:candidates seen:seen];
+    [self addDeviceCodeCandidate:[NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsDeviceKey] toArray:candidates seen:seen];
+    [self addDeviceCodeCandidate:[self stableSystemDeviceCode] toArray:candidates seen:seen];
+
+    return candidates;
+}
+
+- (void)addDeviceCodeCandidate:(NSString *)deviceCode toArray:(NSMutableArray<NSString *> *)array seen:(NSMutableSet<NSString *> *)seen {
+    NSString *normalized = [self normalizedDeviceCodeForSigning:deviceCode];
+    if (normalized.length < 16 || [seen containsObject:normalized]) {
+        return;
+    }
+
+    [seen addObject:normalized];
+    [array addObject:normalized];
 }
 
 - (NSData *)hmacSHA256DataForMessage:(NSString *)message {
@@ -487,6 +553,10 @@ static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
                                    options:0
                                      range:NSMakeRange(0, normalized.length)];
     return normalized;
+}
+
+- (NSString *)normalizedDeviceCodeForSigning:(NSString *)text {
+    return [self normalizedLicenseText:text];
 }
 
 @end
