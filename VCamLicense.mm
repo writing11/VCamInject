@@ -12,9 +12,6 @@ static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
 static NSString * const kVCamLicensePath = @"/var/mobile/Library/VCam/license.key";
 static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.start";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
-static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.device.id";
-static NSString * const kVCamDefaultsLicenseKey = @"com.qianmian.vcaminject.license.key";
-static NSString * const kVCamDefaultsTrialStartKey = @"com.qianmian.vcaminject.trial.start";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static NSString *gVCamCachedDeviceCode = nil;
 
@@ -119,21 +116,26 @@ static NSString *gVCamCachedDeviceCode = nil;
 
     NSString *canonical = [self canonicalCodeForLicense:license];
     [self ensureLicenseDirectory];
-    BOOL fileOK = [canonical writeToFile:kVCamLicensePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    if (![NSFileManager.defaultManager fileExistsAtPath:kVCamLicensePath]) {
+        [NSFileManager.defaultManager createFileAtPath:kVCamLicensePath contents:nil attributes:nil];
+    }
+    chmod(kVCamLicensePath.UTF8String, 0666);
+
+    BOOL fileOK = [canonical writeToFile:kVCamLicensePath atomically:NO encoding:NSUTF8StringEncoding error:nil];
     if (fileOK) {
         chmod(kVCamLicensePath.UTF8String, 0666);
     }
 
-    [NSUserDefaults.standardUserDefaults setObject:canonical forKey:kVCamDefaultsLicenseKey];
-    BOOL defaultsOK = [NSUserDefaults.standardUserDefaults synchronize];
-    NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsLicenseKey];
-    return fileOK || defaultsOK || [saved isEqualToString:canonical];
+    NSString *saved = [NSString stringWithContentsOfFile:kVCamLicensePath encoding:NSUTF8StringEncoding error:nil];
+    VCamParsedLicense *savedLicense = [self parseActivationCode:saved];
+    (void)fileOK;
+    return savedLicense &&
+           [self isParsedLicenseValid:savedLicense allowExpired:NO] &&
+           [[self canonicalCodeForLicense:savedLicense] isEqualToString:canonical];
 }
 
 - (void)clearActivation {
     [NSFileManager.defaultManager removeItemAtPath:kVCamLicensePath error:nil];
-    [NSUserDefaults.standardUserDefaults removeObjectForKey:kVCamDefaultsLicenseKey];
-    [NSUserDefaults.standardUserDefaults synchronize];
 }
 
 - (NSString *)rawDeviceCode {
@@ -150,21 +152,13 @@ static NSString *gVCamCachedDeviceCode = nil;
         return [self cacheAndReturnDeviceCode:normalized];
     }
 
-    NSString *appStored = [self normalizedAlphaNumeric:[NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsDeviceKey]];
-    if (appStored.length >= 16) {
-        [self saveDeviceCodeIfPossible:appStored];
-        return [self cacheAndReturnDeviceCode:appStored];
-    }
-
     NSString *systemCode = [self stableSystemDeviceCode];
     if (systemCode.length >= 16) {
         [self saveDeviceCodeIfPossible:systemCode];
-        [self saveAppDeviceCode:systemCode];
         return [self cacheAndReturnDeviceCode:systemCode];
     }
 
     NSString *generated = [self normalizedAlphaNumeric:NSUUID.UUID.UUIDString];
-    [self saveAppDeviceCode:generated];
     if ([self saveDeviceCodeIfPossible:generated]) {
         return [self cacheAndReturnDeviceCode:generated];
     }
@@ -196,7 +190,7 @@ static NSString *gVCamCachedDeviceCode = nil;
     }
 
     [self ensureLicenseDirectory];
-    BOOL ok = [deviceCode writeToFile:kVCamDevicePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    BOOL ok = [deviceCode writeToFile:kVCamDevicePath atomically:NO encoding:NSUTF8StringEncoding error:nil];
     if (!ok) {
         return NO;
     }
@@ -204,15 +198,6 @@ static NSString *gVCamCachedDeviceCode = nil;
     chmod(kVCamDevicePath.UTF8String, 0666);
     NSString *saved = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
     return [[self normalizedAlphaNumeric:saved] isEqualToString:deviceCode];
-}
-
-- (void)saveAppDeviceCode:(NSString *)deviceCode {
-    if (deviceCode.length < 16) {
-        return;
-    }
-
-    [NSUserDefaults.standardUserDefaults setObject:deviceCode forKey:kVCamDefaultsDeviceKey];
-    [NSUserDefaults.standardUserDefaults synchronize];
 }
 
 - (NSTimeInterval)trialStartTimeCreatingIfNeeded:(BOOL)createIfNeeded {
@@ -224,19 +209,11 @@ static NSString *gVCamCachedDeviceCode = nil;
         return start;
     }
 
-    start = [NSUserDefaults.standardUserDefaults doubleForKey:kVCamDefaultsTrialStartKey];
-    if (start > 0) {
-        [self saveTrialStartTimeIfPossible:start];
-        return start;
-    }
-
     if (!createIfNeeded) {
         return 0;
     }
 
     start = [NSDate.date timeIntervalSince1970];
-    [NSUserDefaults.standardUserDefaults setDouble:start forKey:kVCamDefaultsTrialStartKey];
-    [NSUserDefaults.standardUserDefaults synchronize];
     [self saveTrialStartTimeIfPossible:start];
     return start;
 }
@@ -248,7 +225,7 @@ static NSString *gVCamCachedDeviceCode = nil;
 
     [self ensureLicenseDirectory];
     NSString *value = [NSString stringWithFormat:@"%.0f", start];
-    BOOL ok = [value writeToFile:kVCamTrialStartPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    BOOL ok = [value writeToFile:kVCamTrialStartPath atomically:NO encoding:NSUTF8StringEncoding error:nil];
     if (ok) {
         chmod(kVCamTrialStartPath.UTF8String, 0666);
     }
@@ -282,11 +259,6 @@ static NSString *gVCamCachedDeviceCode = nil;
         }
     }
 
-    NSString *vendor = UIDevice.currentDevice.identifierForVendor.UUIDString;
-    if (vendor.length > 0) {
-        [material appendFormat:@"IFV:%@|", vendor];
-    }
-
     NSString *normalized = [self normalizedAlphaNumeric:material];
     if (normalized.length < 8) {
         return nil;
@@ -310,13 +282,7 @@ static NSString *gVCamCachedDeviceCode = nil;
 
 - (VCamParsedLicense *)parsedLicenseFromStoredCode {
     NSString *stored = [NSString stringWithContentsOfFile:kVCamLicensePath encoding:NSUTF8StringEncoding error:nil];
-    VCamParsedLicense *license = [self parseActivationCode:stored];
-    if (license) {
-        return license;
-    }
-
-    NSString *defaultsStored = [NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsLicenseKey];
-    return [self parseActivationCode:defaultsStored];
+    return [self parseActivationCode:stored];
 }
 
 - (VCamParsedLicense *)parseActivationCode:(NSString *)code {
@@ -441,7 +407,6 @@ static NSString *gVCamCachedDeviceCode = nil;
     [self addDeviceCodeCandidate:gVCamCachedDeviceCode toArray:candidates seen:seen];
     [self addDeviceCodeCandidate:[self rawDeviceCode] toArray:candidates seen:seen];
     [self addDeviceCodeCandidate:[NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil] toArray:candidates seen:seen];
-    [self addDeviceCodeCandidate:[NSUserDefaults.standardUserDefaults stringForKey:kVCamDefaultsDeviceKey] toArray:candidates seen:seen];
     [self addDeviceCodeCandidate:[self stableSystemDeviceCode] toArray:candidates seen:seen];
 
     return candidates;

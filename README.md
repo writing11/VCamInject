@@ -2,35 +2,36 @@
 
 RootHide/rootless iOS camera replacement tweak.
 
-## What this build does
+## What This Build Does
 
 - Injects into apps that use `AVCaptureVideoDataOutput`, `AVCaptureVideoPreviewLayer`, or `AVCapturePhoto`.
 - Covers `AVCaptureVideoPreviewLayer` with the current virtual source so apps do not keep showing the real camera preview while receiving replaced frames.
-- The preview overlay stays hidden until a real virtual frame is ready, preventing black screenshots/photos in apps that capture the preview layer.
-- Replaces camera sample buffers with a selected video.
-- Two-finger quick double tap shows or hides a small floating red `Y` button.
-- Tap the floating button to open the control menu.
-- `Choose video and replace` opens the iOS photo video picker and enables replacement immediately after selection.
+- Keeps the preview overlay hidden until a real virtual frame is ready, which helps avoid black photos in apps that capture the preview layer.
+- Replaces camera sample buffers with a selected phone-album video or PC raw-frame stream.
+- Exactly two-finger double tap shows or hides a floating black/gold `V` button.
+- Tap the floating `V` button to open the control menu.
+- When the floating `V` button is visible, pinch with two fingers on the screen to adjust virtual video size. The size is saved globally for all apps.
+- `Choose video and replace` opens the iOS video picker and enables replacement immediately after selection.
 - `Restore real camera` disables replacement and returns the app to the real camera.
 - Uses `PHPickerViewController`, so it avoids the common crash caused by host apps missing `NSPhotoLibraryUsageDescription`.
 - Includes `vcamreceiverd`, a phone-side daemon that listens on TCP port `9999` for the Windows sender handshake.
 - Adds offline activation with a 2-hour trial. Camera replacement is blocked after the trial ends unless the device is activated.
 
-## Phone controls
+## Phone Controls
 
 1. Open the target app camera page.
 2. Tap the screen twice quickly with exactly two fingers.
-3. A floating red `Y` button appears.
-4. Tap `Y`.
+3. A floating black/gold `V` button appears.
+4. Tap `V`.
 5. During the 2-hour trial, choose `Choose video and replace` directly.
 6. After the trial ends, copy the device code and enter an activation code.
 7. Pick a video from the phone album.
 
-The selected video is copied into the app temporary directory and is used immediately. There is no separate enable button.
+The selected video is copied into `/var/mobile/Library/VCam/source.*` and is used immediately. All injected apps share the same selected video. There is no separate enable button.
 
 To restore the real camera:
 
-1. Tap the floating red `Y` button.
+1. Tap the floating black/gold `V` button.
 2. Choose `Restore real camera`.
 
 ## Activation
@@ -38,9 +39,10 @@ To restore the real camera:
 This build uses offline activation. It does not need a server.
 
 1. The tweak can be used for 2 hours without activation.
-2. After the trial ends, open the floating red `Y` button to copy the device code.
-3. Use `VCamKeygen.py` or `VCamKeygen.exe` on Windows to generate an activation code.
-4. Supported activation types:
+2. You can activate early without waiting for the trial to end.
+3. Open the floating black/gold `V` button to copy the device code.
+4. Use `VCamKeygen.py` or `VCamKeygen.exe` on Windows to generate an activation code.
+5. Supported activation types:
 
 - `1个月`
 - `永久`
@@ -55,18 +57,23 @@ The device code is created once during package installation at:
 /var/mobile/Library/VCam/device.id
 ```
 
-If every phone shows the same device code or the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions. This version also falls back to per-device system information and app-local storage instead of showing a shared fallback code.
+This version stores activation globally in:
 
-## Priority order
+```text
+/var/mobile/Library/VCam/license.key
+```
+
+So one activation is shared by all injected apps. If every phone shows the same device code, or the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions.
+
+## Priority Order
 
 The tweak uses sources in this order:
 
 1. `/var/mobile/Library/VCam/frame.bgra` with `/var/mobile/Library/VCam/frame.info`
-2. Video selected from the phone album in the current app process
-3. `/var/mobile/Library/VCam/source.mp4`, `.mov`, or `.m4v`
-4. Real camera
+2. `/var/mobile/Library/VCam/source.mp4`, `.mov`, `.m4v`, or `.avi`
+3. Real camera
 
-## Windows sender
+## Windows Sender
 
 `vcamreceiverd` listens on port `9999` and acknowledges the Windows handshake.
 
@@ -89,7 +96,7 @@ Those files are the tweak's highest-priority source, so PC video replaces the ca
 
 Use the included `WinVCamRawSender.exe` / `WinVCamRawSender.py` tool for live PC video replacement.
 
-## Build with GitHub Actions
+## Build With GitHub Actions
 
 Upload the whole source folder to GitHub, including:
 
@@ -127,7 +134,7 @@ dpkg -i com.qianmian.vcaminject_*.deb
 
 Then restart the target app. If injection does not refresh, respring.
 
-## Check the receiver daemon
+## Check The Receiver Daemon
 
 On the phone terminal:
 

@@ -3,14 +3,19 @@
 #import "VCamLicense.h"
 
 #import <PhotosUI/PhotosUI.h>
+#import <sys/stat.h>
 
 #define VCamText(x) @x
+
+static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
 
 @interface VCamVideoPicker () <PHPickerViewControllerDelegate>
 @property (nonatomic, weak) UIViewController *presentingController;
 @property (nonatomic, weak) UIWindow *controlWindow;
 @property (nonatomic, strong) UIButton *controlButton;
+@property (nonatomic, strong) UIPinchGestureRecognizer *scaleGesture;
 @property (nonatomic, assign) BOOL presenting;
+@property (nonatomic, assign) CGFloat pinchStartVideoScale;
 @end
 
 @implementation VCamVideoPicker
@@ -40,6 +45,7 @@
     if (self.controlButton.superview) {
         [self.controlButton removeFromSuperview];
         self.controlButton = nil;
+        [self detachScaleGesture];
         self.controlWindow = nil;
         return;
     }
@@ -47,12 +53,14 @@
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.frame = CGRectMake(MAX(12, window.bounds.size.width - 68), 120, 52, 52);
     button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
-    button.backgroundColor = [UIColor colorWithRed:0.92 green:0.05 blue:0.05 alpha:0.9];
+    button.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.02 alpha:0.92];
     button.layer.cornerRadius = 26;
     button.layer.masksToBounds = YES;
+    button.layer.borderWidth = 1.5;
+    button.layer.borderColor = [UIColor colorWithRed:1.0 green:0.72 blue:0.18 alpha:1.0].CGColor;
     button.titleLabel.font = [UIFont boldSystemFontOfSize:28];
-    [button setTitle:@"Y" forState:UIControlStateNormal];
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [button setTitle:@"V" forState:UIControlStateNormal];
+    [button setTitleColor:[UIColor colorWithRed:1.0 green:0.78 blue:0.22 alpha:1.0] forState:UIControlStateNormal];
     [button addTarget:self action:@selector(controlButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(controlButtonPanned:)];
@@ -61,6 +69,7 @@
     [window addSubview:button];
     self.controlWindow = window;
     self.controlButton = button;
+    [self attachScaleGestureToWindow:window];
 }
 
 - (void)controlButtonTapped:(UIButton *)sender {
@@ -84,6 +93,51 @@
     [pan setTranslation:CGPointZero inView:container];
 }
 
+- (void)attachScaleGestureToWindow:(UIWindow *)window {
+    [self detachScaleGesture];
+    UIPinchGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(controlWindowPinched:)];
+    pinch.cancelsTouchesInView = NO;
+    pinch.delaysTouchesBegan = NO;
+    pinch.delaysTouchesEnded = NO;
+    [window addGestureRecognizer:pinch];
+    self.scaleGesture = pinch;
+}
+
+- (void)detachScaleGesture {
+    if (self.scaleGesture.view) {
+        [self.scaleGesture.view removeGestureRecognizer:self.scaleGesture];
+    }
+    self.scaleGesture = nil;
+    self.pinchStartVideoScale = 0;
+}
+
+- (void)controlWindowPinched:(UIPinchGestureRecognizer *)pinch {
+    if (!self.controlButton.superview || ![[VCamLicense sharedLicense] canUseVirtualCamera]) {
+        return;
+    }
+
+    if (pinch.state == UIGestureRecognizerStateBegan) {
+        self.pinchStartVideoScale = [[VCamFrameProvider sharedProvider] videoScale];
+    }
+
+    if (self.pinchStartVideoScale <= 0) {
+        self.pinchStartVideoScale = [[VCamFrameProvider sharedProvider] videoScale];
+    }
+
+    if (pinch.state == UIGestureRecognizerStateBegan ||
+        pinch.state == UIGestureRecognizerStateChanged ||
+        pinch.state == UIGestureRecognizerStateEnded) {
+        CGFloat nextScale = self.pinchStartVideoScale * pinch.scale;
+        [[VCamFrameProvider sharedProvider] setVideoScale:nextScale];
+    }
+
+    if (pinch.state == UIGestureRecognizerStateEnded ||
+        pinch.state == UIGestureRecognizerStateCancelled ||
+        pinch.state == UIGestureRecognizerStateFailed) {
+        self.pinchStartVideoScale = 0;
+    }
+}
+
 - (void)showControlMenuFromButton:(UIButton *)button {
     UIWindow *window = self.controlWindow ?: button.window;
     UIViewController *top = [self topControllerForWindow:window];
@@ -98,14 +152,17 @@
 
     VCamLicense *license = [VCamLicense sharedLicense];
     NSString *status = [license activationStatusText];
+    NSString *scaleStatus = [NSString stringWithFormat:@"%@%.0f%%", VCamText("\u753b\u9762\u5927\u5c0f\uff1a"), [[VCamFrameProvider sharedProvider] videoScale] * 100.0];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
-                                                                   message:[NSString stringWithFormat:@"%@\n%@", VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236"), status]
+                                                                   message:[NSString stringWithFormat:@"%@\n%@\n%@", VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236"), status, scaleStatus]
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9009\u62e9\u89c6\u9891\u5e76\u66ff\u6362")
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
-        [self presentPhotoPickerFromWindow:window];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self presentPhotoPickerFromWindow:window];
+        });
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u6062\u590d\u539f\u76f8\u673a")
@@ -121,14 +178,6 @@
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self showActivationInputFromController:top];
         });
-    }]];
-
-    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9690\u85cf\u60ac\u6d6e\u6309\u94ae")
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
-        [self.controlButton removeFromSuperview];
-        self.controlButton = nil;
-        self.controlWindow = nil;
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u53d6\u6d88")
@@ -349,20 +398,22 @@
 - (NSURL *)copyPickedVideoToStableTempURL:(NSURL *)url preferredType:(NSString *)typeIdentifier {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *ext = url.pathExtension.length > 0 ? url.pathExtension.lowercaseString : [self extensionForType:typeIdentifier];
-    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"VCamSelected"];
+    NSString *dir = kVCamSharedDir;
     [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    chmod(dir.UTF8String, 0777);
 
     for (NSString *oldExt in @[@"mp4", @"mov", @"m4v", @"avi"]) {
-        NSString *oldPath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"selected.%@", oldExt]];
+        NSString *oldPath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"source.%@", oldExt]];
         [fm removeItemAtPath:oldPath error:nil];
     }
 
-    NSString *targetPath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"selected.%@", ext]];
+    NSString *targetPath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"source.%@", ext]];
     NSURL *targetURL = [NSURL fileURLWithPath:targetPath];
     [fm removeItemAtURL:targetURL error:nil];
 
     NSError *copyError = nil;
     if ([fm copyItemAtURL:url toURL:targetURL error:&copyError]) {
+        chmod(targetPath.UTF8String, 0666);
         return targetURL;
     }
 

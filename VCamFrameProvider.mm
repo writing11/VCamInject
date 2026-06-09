@@ -13,7 +13,12 @@ static NSString * const kVCamInfoPath = @"/var/mobile/Library/VCam/frame.info";
 static NSString * const kVCamVideoMP4Path = @"/var/mobile/Library/VCam/source.mp4";
 static NSString * const kVCamVideoMOVPath = @"/var/mobile/Library/VCam/source.mov";
 static NSString * const kVCamVideoM4VPath = @"/var/mobile/Library/VCam/source.m4v";
+static NSString * const kVCamVideoAVIPath = @"/var/mobile/Library/VCam/source.avi";
 static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled";
+static NSString * const kVCamScalePath = @"/var/mobile/Library/VCam/video.scale";
+static CGFloat const kVCamDefaultVideoScale = 1.0;
+static CGFloat const kVCamMinVideoScale = 0.35;
+static CGFloat const kVCamMaxVideoScale = 3.0;
 
 @interface VCamFrameProvider ()
 @property (nonatomic, strong) AVAssetReader *assetReader;
@@ -32,6 +37,8 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 @property (nonatomic, assign) NSTimeInterval activationTime;
 @property (nonatomic, assign) BOOL lastPhotoPrefersPortrait;
 @property (nonatomic, assign) BOOL disabledInProcess;
+@property (nonatomic, assign) BOOL loadedVideoScale;
+@property (nonatomic, assign) CGFloat cachedVideoScale;
 @end
 
 @implementation VCamFrameProvider
@@ -117,12 +124,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return nil;
     }
 
-    CGFloat scale = MAX((CGFloat)dstWidth / CGRectGetWidth(src), (CGFloat)dstHeight / CGRectGetHeight(src));
-    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
-    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
-    CGFloat tx = ((CGFloat)dstWidth - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
-    CGFloat ty = ((CGFloat)dstHeight - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
-    CIImage *scaled = [previewImage imageByApplyingTransform:CGAffineTransformMake(scale, 0, 0, scale, tx, ty)];
+    CIImage *scaled = [self image:previewImage scaledToOutputWidth:dstWidth height:dstHeight applyUserScale:YES];
 
     CVReturn lock = CVPixelBufferLockBaseAddress((CVPixelBufferRef)referenceImage, 0);
     if (lock != kCVReturnSuccess) {
@@ -204,7 +206,8 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     [self resetLocalVideoReader];
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
-    [@"disabled" writeToFile:kVCamDisabledPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [@"disabled" writeToFile:kVCamDisabledPath atomically:NO encoding:NSUTF8StringEncoding error:nil];
+    chmod(kVCamDisabledPath.UTF8String, 0666);
     }
 }
 
@@ -238,6 +241,50 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     }
 }
 
+- (CGFloat)videoScale {
+    @synchronized (self) {
+        if (!self.loadedVideoScale) {
+            NSString *stored = [NSString stringWithContentsOfFile:kVCamScalePath encoding:NSUTF8StringEncoding error:nil];
+            CGFloat value = stored.doubleValue;
+            if (value <= 0) {
+                value = kVCamDefaultVideoScale;
+            }
+            self.cachedVideoScale = [self clampedVideoScale:value];
+            self.loadedVideoScale = YES;
+        }
+        return self.cachedVideoScale > 0 ? self.cachedVideoScale : kVCamDefaultVideoScale;
+    }
+}
+
+- (void)setVideoScale:(CGFloat)scale {
+    @synchronized (self) {
+        self.cachedVideoScale = [self clampedVideoScale:scale];
+        self.loadedVideoScale = YES;
+        [self saveVideoScale:self.cachedVideoScale];
+    }
+}
+
+- (CGFloat)clampedVideoScale:(CGFloat)scale {
+    if (!isfinite(scale) || scale <= 0) {
+        return kVCamDefaultVideoScale;
+    }
+    return MIN(MAX(scale, kVCamMinVideoScale), kVCamMaxVideoScale);
+}
+
+- (void)saveVideoScale:(CGFloat)scale {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
+    chmod("/var/mobile/Library/VCam", 0777);
+    NSString *value = [NSString stringWithFormat:@"%.4f", [self clampedVideoScale:scale]];
+    if (![fm fileExistsAtPath:kVCamScalePath]) {
+        [fm createFileAtPath:kVCamScalePath contents:nil attributes:nil];
+    }
+    chmod(kVCamScalePath.UTF8String, 0666);
+    if ([value writeToFile:kVCamScalePath atomically:NO encoding:NSUTF8StringEncoding error:nil]) {
+        chmod(kVCamScalePath.UTF8String, 0666);
+    }
+}
+
 - (nullable NSURL *)currentVideoURL {
     if (self.selectedVideoURL) {
         return self.selectedVideoURL;
@@ -251,7 +298,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 }
 
 - (nullable NSString *)firstExistingVideoPath {
-    NSArray<NSString *> *paths = @[kVCamVideoMP4Path, kVCamVideoMOVPath, kVCamVideoM4VPath];
+    NSArray<NSString *> *paths = @[kVCamVideoMP4Path, kVCamVideoMOVPath, kVCamVideoM4VPath, kVCamVideoAVIPath];
     NSFileManager *fm = NSFileManager.defaultManager;
     for (NSString *path in paths) {
         if ([fm fileExistsAtPath:path]) {
@@ -364,13 +411,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 
     CIImage *image = [self previewImageFromSourceImage:sourceImage targetWidth:dstWidth targetHeight:dstHeight];
     CGRect src = image.extent;
-    CGFloat scale = MAX((CGFloat)dstWidth / CGRectGetWidth(src), (CGFloat)dstHeight / CGRectGetHeight(src));
-    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
-    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
-    CGFloat tx = ((CGFloat)dstWidth - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
-    CGFloat ty = ((CGFloat)dstHeight - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
-    CGAffineTransform transform = CGAffineTransformMake(scale, 0, 0, scale, tx, ty);
-    CIImage *scaled = [image imageByApplyingTransform:transform];
+    CIImage *scaled = [self image:image scaledToOutputWidth:dstWidth height:dstHeight applyUserScale:YES];
 
     CIContext *context = [self sharedCIContext];
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
@@ -439,13 +480,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return reference;
     }
 
-    CGFloat scale = MAX((CGFloat)dstWidth / CGRectGetWidth(src), (CGFloat)dstHeight / CGRectGetHeight(src));
-    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
-    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
-    CGFloat tx = ((CGFloat)dstWidth - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
-    CGFloat ty = ((CGFloat)dstHeight - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
-    CGAffineTransform transform = CGAffineTransformMake(scale, 0, 0, scale, tx, ty);
-    CIImage *scaled = [image imageByApplyingTransform:transform];
+    CIImage *scaled = [self image:image scaledToOutputWidth:dstWidth height:dstHeight applyUserScale:YES];
 
     CVReturn lock = CVPixelBufferLockBaseAddress((CVPixelBufferRef)referenceImage, 0);
     if (lock != kCVReturnSuccess) {
@@ -755,6 +790,29 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
     return props[(NSString *)kCGImagePropertyOrientation];
 }
 
+- (CIImage *)image:(CIImage *)image scaledToOutputWidth:(size_t)width height:(size_t)height applyUserScale:(BOOL)applyUserScale {
+    CGRect src = image.extent;
+    CGRect target = CGRectMake(0, 0, width, height);
+    if (CGRectIsEmpty(src) || width == 0 || height == 0) {
+        return [image imageByCroppingToRect:target];
+    }
+
+    CGFloat scale = MAX((CGFloat)width / CGRectGetWidth(src), (CGFloat)height / CGRectGetHeight(src));
+    if (applyUserScale) {
+        scale *= [self videoScale];
+    }
+
+    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
+    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
+    CGFloat tx = ((CGFloat)width - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
+    CGFloat ty = ((CGFloat)height - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
+    CIImage *scaled = [image imageByApplyingTransform:CGAffineTransformMake(scale, 0, 0, scale, tx, ty)];
+    CIImage *cropped = [scaled imageByCroppingToRect:target];
+
+    CIImage *background = [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:1]] imageByCroppingToRect:target];
+    return [cropped imageByCompositingOverImage:background];
+}
+
 - (nullable NSData *)JPEGFromImage:(CIImage *)image width:(size_t)width height:(size_t)height orientation:(nullable NSNumber *)orientation colorSpace:(CGColorSpaceRef)colorSpace {
     if (!image || width == 0 || height == 0) {
         return nil;
@@ -765,13 +823,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
         return nil;
     }
 
-    CGFloat scale = MAX((CGFloat)width / CGRectGetWidth(src), (CGFloat)height / CGRectGetHeight(src));
-    CGFloat scaledWidth = CGRectGetWidth(src) * scale;
-    CGFloat scaledHeight = CGRectGetHeight(src) * scale;
-    CGFloat tx = ((CGFloat)width - scaledWidth) * 0.5 - CGRectGetMinX(src) * scale;
-    CGFloat ty = ((CGFloat)height - scaledHeight) * 0.5 - CGRectGetMinY(src) * scale;
-    CIImage *scaled = [image imageByApplyingTransform:CGAffineTransformMake(scale, 0, 0, scale, tx, ty)];
-    CIImage *cropped = [scaled imageByCroppingToRect:CGRectMake(0, 0, width, height)];
+    CIImage *cropped = [self image:image scaledToOutputWidth:width height:height applyUserScale:YES];
 
     NSMutableDictionary *options = [@{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @0.92} mutableCopy];
     if (orientation) {

@@ -276,8 +276,6 @@ static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer) {
 
 %end
 
-static NSTimeInterval vcamLastTwoFingerTap = 0;
-
 %hook UIWindow
 
 - (void)sendEvent:(UIEvent *)event {
@@ -287,31 +285,27 @@ static NSTimeInterval vcamLastTwoFingerTap = 0;
         return;
     }
 
-    NSSet<UITouch *> *touches = event.allTouches;
+    NSSet<UITouch *> *touches = [event touchesForWindow:self];
     if (touches.count != 2) {
         return;
     }
 
     NSUInteger beganCount = 0;
-    NSUInteger tapCount = 0;
+    BOOL allSecondTap = YES;
     for (UITouch *touch in touches) {
         if (touch.phase == UITouchPhaseBegan) {
             beganCount++;
         }
-        tapCount = MAX(tapCount, touch.tapCount);
+        if (touch.tapCount != 2) {
+            allSecondTap = NO;
+        }
     }
 
-    if (beganCount != 2 || tapCount < 1) {
+    if (beganCount != 2 || !allSecondTap) {
         return;
     }
 
-    NSTimeInterval now = CACurrentMediaTime();
-    if (now - vcamLastTwoFingerTap <= 0.55) {
-        vcamLastTwoFingerTap = 0;
-        [[VCamVideoPicker sharedPicker] presentControlPanelFromWindow:self];
-    } else {
-        vcamLastTwoFingerTap = now;
-    }
+    [[VCamVideoPicker sharedPicker] presentControlPanelFromWindow:self];
 }
 
 %end
