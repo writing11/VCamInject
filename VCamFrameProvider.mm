@@ -182,11 +182,12 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
 
 - (void)setLocalVideoURL:(NSURL *)url {
     @synchronized (self) {
-    self.selectedVideoURL = url;
-    self.disabledInProcess = NO;
-    self.activationTime = [NSDate timeIntervalSinceReferenceDate] + 0.15;
-    [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
-    [self resetLocalVideoReader];
+        self.selectedVideoURL = url;
+        self.cachedVideoScale = kVCamDefaultVideoScale;
+        self.disabledInProcess = NO;
+        self.activationTime = [NSDate timeIntervalSinceReferenceDate] + 0.15;
+        [NSFileManager.defaultManager removeItemAtPath:kVCamDisabledPath error:nil];
+        [self resetLocalVideoReader];
     }
 }
 
@@ -251,6 +252,12 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
 - (void)setVideoScale:(CGFloat)scale {
     @synchronized (self) {
         self.cachedVideoScale = [self clampedVideoScale:scale];
+    }
+}
+
+- (void)resetVideoScale {
+    @synchronized (self) {
+        self.cachedVideoScale = kVCamDefaultVideoScale;
     }
 }
 

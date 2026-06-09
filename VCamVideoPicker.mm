@@ -50,6 +50,8 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
         return;
     }
 
+    [[VCamFrameProvider sharedProvider] resetVideoScale];
+
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.frame = CGRectMake(MAX(12, window.bounds.size.width - 68), 120, 52, 52);
     button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;

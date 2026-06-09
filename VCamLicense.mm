@@ -11,9 +11,15 @@ static NSString * const kVCamLicenseDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
 static NSString * const kVCamLicensePath = @"/var/mobile/Library/VCam/license.key";
 static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.start";
+static NSString * const kVCamDefaultsSuiteName = @"com.qianmian.vcam";
+static NSString * const kVCamDefaultsDeviceKey = @"device.id";
+static NSString * const kVCamDefaultsLicenseKey = @"license.key";
+static NSString * const kVCamDefaultsTrialStartKey = @"trial.start";
+static NSString * const kVCamPasteboardName = @"com.qianmian.vcam.store";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static NSString *gVCamCachedDeviceCode = nil;
+static NSString *gVCamCachedLicenseCode = nil;
 static NSTimeInterval gVCamCachedTrialStart = 0;
 
 @interface VCamParsedLicense : NSObject
@@ -120,27 +126,24 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     }
 
     NSString *canonical = [self canonicalCodeForLicense:license];
-    [self ensureLicenseDirectory];
-    if (![NSFileManager.defaultManager fileExistsAtPath:kVCamLicensePath]) {
-        [NSFileManager.defaultManager createFileAtPath:kVCamLicensePath contents:nil attributes:nil];
-    }
-    chmod(kVCamLicensePath.UTF8String, 0666);
-
-    BOOL fileOK = [canonical writeToFile:kVCamLicensePath atomically:NO encoding:NSUTF8StringEncoding error:nil];
-    if (fileOK) {
-        chmod(kVCamLicensePath.UTF8String, 0666);
+    @synchronized (VCamLicense.class) {
+        gVCamCachedLicenseCode = [canonical copy];
     }
 
-    NSString *saved = [NSString stringWithContentsOfFile:kVCamLicensePath encoding:NSUTF8StringEncoding error:nil];
-    VCamParsedLicense *savedLicense = [self parseActivationCode:saved];
-    (void)fileOK;
-    return savedLicense &&
-           [self isParsedLicenseValid:savedLicense allowExpired:NO] &&
-           [[self canonicalCodeForLicense:savedLicense] isEqualToString:canonical];
+    BOOL saved = [self writePersistentString:canonical filePath:kVCamLicensePath defaultsKey:kVCamDefaultsLicenseKey];
+    VCamParsedLicense *savedLicense = [self parsedLicenseFromStoredCode];
+    return saved ||
+           (savedLicense &&
+            [self isParsedLicenseValid:savedLicense allowExpired:NO] &&
+            [[self canonicalCodeForLicense:savedLicense] isEqualToString:canonical]);
 }
 
 - (void)clearActivation {
     [NSFileManager.defaultManager removeItemAtPath:kVCamLicensePath error:nil];
+    [self removePersistentDefaultsValueForKey:kVCamDefaultsLicenseKey];
+    @synchronized (VCamLicense.class) {
+        gVCamCachedLicenseCode = nil;
+    }
 }
 
 - (NSString *)rawDeviceCode {
@@ -154,6 +157,13 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     NSString *stored = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
     NSString *normalized = [self normalizedAlphaNumeric:stored];
     if (normalized.length >= 16) {
+        return [self cacheAndReturnDeviceCode:normalized];
+    }
+
+    NSString *fallback = [self persistentDefaultsStringForKey:kVCamDefaultsDeviceKey];
+    normalized = [self normalizedAlphaNumeric:fallback];
+    if (normalized.length >= 16) {
+        [self saveDeviceCodeIfPossible:normalized];
         return [self cacheAndReturnDeviceCode:normalized];
     }
 
@@ -189,20 +199,126 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     chmod(kVCamLicenseDir.UTF8String, 0777);
 }
 
+- (BOOL)writePersistentString:(NSString *)value filePath:(NSString *)filePath defaultsKey:(NSString *)key {
+    if (value.length == 0 || key.length == 0) {
+        return NO;
+    }
+
+    BOOL wroteFile = NO;
+    if (filePath.length > 0) {
+        [self ensureLicenseDirectory];
+        if (![NSFileManager.defaultManager fileExistsAtPath:filePath]) {
+            [NSFileManager.defaultManager createFileAtPath:filePath contents:nil attributes:nil];
+        }
+        chmod(filePath.UTF8String, 0666);
+        wroteFile = [value writeToFile:filePath atomically:NO encoding:NSUTF8StringEncoding error:nil];
+        if (wroteFile) {
+            chmod(filePath.UTF8String, 0666);
+        }
+    }
+
+    BOOL wrotePasteboard = [self writePasteboardString:value forKey:key];
+
+    NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
+    [suite setObject:value forKey:key];
+    BOOL wroteSuite = [suite synchronize];
+
+    [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
+    BOOL wroteStandard = [NSUserDefaults.standardUserDefaults synchronize];
+
+    return wroteFile || wrotePasteboard || wroteSuite || wroteStandard;
+}
+
+- (NSString *)persistentDefaultsStringForKey:(NSString *)key {
+    NSString *value = [self pasteboardStringForKey:key];
+    if (value.length > 0) {
+        return value;
+    }
+
+    NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
+    value = [suite stringForKey:key];
+    if (value.length > 0) {
+        return value;
+    }
+
+    value = [NSUserDefaults.standardUserDefaults stringForKey:key];
+    return value.length > 0 ? value : nil;
+}
+
+- (void)removePersistentDefaultsValueForKey:(NSString *)key {
+    [self removePasteboardStringForKey:key];
+    NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
+    [suite removeObjectForKey:key];
+    [suite synchronize];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
+    [NSUserDefaults.standardUserDefaults synchronize];
+}
+
+- (BOOL)writePasteboardString:(NSString *)value forKey:(NSString *)key {
+    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
+    store[key] = value;
+    return [self savePasteboardStore:store];
+}
+
+- (NSString *)pasteboardStringForKey:(NSString *)key {
+    return [self pasteboardStore][key];
+}
+
+- (void)removePasteboardStringForKey:(NSString *)key {
+    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
+    [store removeObjectForKey:key];
+    [self savePasteboardStore:store];
+}
+
+- (NSMutableDictionary<NSString *, NSString *> *)pasteboardStore {
+    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
+    NSString *payload = pasteboard.string ?: @"";
+    NSMutableDictionary<NSString *, NSString *> *store = [NSMutableDictionary dictionary];
+    for (NSString *line in [payload componentsSeparatedByString:@"\n"]) {
+        NSRange sep = [line rangeOfString:@"="];
+        if (sep.location == NSNotFound || sep.location == 0) {
+            continue;
+        }
+        NSString *key = [line substringToIndex:sep.location];
+        NSString *value = [line substringFromIndex:sep.location + sep.length];
+        if (key.length > 0 && value.length > 0) {
+            store[key] = value;
+        }
+    }
+    return store;
+}
+
+- (BOOL)savePasteboardStore:(NSDictionary<NSString *, NSString *> *)store {
+    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (NSString *key in store.allKeys) {
+        NSString *value = store[key];
+        if (key.length > 0 && value.length > 0) {
+            [lines addObject:[NSString stringWithFormat:@"%@=%@", key, value]];
+        }
+    }
+    pasteboard.string = [lines componentsJoinedByString:@"\n"];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if ([pasteboard respondsToSelector:@selector(setPersistent:)]) {
+        pasteboard.persistent = YES;
+    }
+#pragma clang diagnostic pop
+    return pasteboard.string.length > 0 || store.count == 0;
+}
+
 - (BOOL)saveDeviceCodeIfPossible:(NSString *)deviceCode {
     if (deviceCode.length < 16) {
         return NO;
     }
 
     [self ensureLicenseDirectory];
-    BOOL ok = [deviceCode writeToFile:kVCamDevicePath atomically:NO encoding:NSUTF8StringEncoding error:nil];
-    if (!ok) {
-        return NO;
-    }
-
-    chmod(kVCamDevicePath.UTF8String, 0666);
+    BOOL ok = [self writePersistentString:deviceCode filePath:kVCamDevicePath defaultsKey:kVCamDefaultsDeviceKey];
     NSString *saved = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
-    return [[self normalizedAlphaNumeric:saved] isEqualToString:deviceCode];
+    NSString *fallback = [self persistentDefaultsStringForKey:kVCamDefaultsDeviceKey];
+    return ok ||
+           [[self normalizedAlphaNumeric:saved] isEqualToString:deviceCode] ||
+           [[self normalizedAlphaNumeric:fallback] isEqualToString:deviceCode];
 }
 
 - (NSTimeInterval)trialStartTimeCreatingIfNeeded:(BOOL)createIfNeeded {
@@ -214,12 +330,20 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
 
     [self ensureLicenseDirectory];
 
-    NSString *stored = [NSString stringWithContentsOfFile:kVCamTrialStartPath encoding:NSUTF8StringEncoding error:nil];
-    NSTimeInterval start = stored.doubleValue;
+    NSTimeInterval fileStart = [NSString stringWithContentsOfFile:kVCamTrialStartPath encoding:NSUTF8StringEncoding error:nil].doubleValue;
+    NSTimeInterval fallbackStart = [self persistentDefaultsStringForKey:kVCamDefaultsTrialStartKey].doubleValue;
+    NSTimeInterval start = 0;
+    if (fileStart > 0 && fallbackStart > 0) {
+        start = MIN(fileStart, fallbackStart);
+    } else {
+        start = MAX(fileStart, fallbackStart);
+    }
+
     if (start > 0) {
         @synchronized (VCamLicense.class) {
             gVCamCachedTrialStart = start;
         }
+        [self saveTrialStartTimeIfPossible:start];
         return start;
     }
 
@@ -240,17 +364,8 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
         return NO;
     }
 
-    [self ensureLicenseDirectory];
     NSString *value = [NSString stringWithFormat:@"%.0f", start];
-    if (![NSFileManager.defaultManager fileExistsAtPath:kVCamTrialStartPath]) {
-        [NSFileManager.defaultManager createFileAtPath:kVCamTrialStartPath contents:nil attributes:nil];
-    }
-    chmod(kVCamTrialStartPath.UTF8String, 0666);
-    BOOL ok = [value writeToFile:kVCamTrialStartPath atomically:NO encoding:NSUTF8StringEncoding error:nil];
-    if (ok) {
-        chmod(kVCamTrialStartPath.UTF8String, 0666);
-    }
-    return ok;
+    return [self writePersistentString:value filePath:kVCamTrialStartPath defaultsKey:kVCamDefaultsTrialStartKey];
 }
 
 - (NSString *)stableSystemDeviceCode {
@@ -302,8 +417,37 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
 }
 
 - (VCamParsedLicense *)parsedLicenseFromStoredCode {
+    NSMutableArray<NSString *> *codes = [NSMutableArray array];
+    @synchronized (VCamLicense.class) {
+        if (gVCamCachedLicenseCode.length > 0) {
+            [codes addObject:gVCamCachedLicenseCode];
+        }
+    }
+
     NSString *stored = [NSString stringWithContentsOfFile:kVCamLicensePath encoding:NSUTF8StringEncoding error:nil];
-    return [self parseActivationCode:stored];
+    if (stored.length > 0) {
+        [codes addObject:stored];
+    }
+
+    NSString *fallback = [self persistentDefaultsStringForKey:kVCamDefaultsLicenseKey];
+    if (fallback.length > 0) {
+        [codes addObject:fallback];
+    }
+
+    VCamParsedLicense *firstParsed = nil;
+    for (NSString *code in codes) {
+        VCamParsedLicense *license = [self parseActivationCode:code];
+        if (!license) {
+            continue;
+        }
+        if (!firstParsed) {
+            firstParsed = license;
+        }
+        if ([self isParsedLicenseValid:license allowExpired:NO]) {
+            return license;
+        }
+    }
+    return firstParsed;
 }
 
 - (VCamParsedLicense *)parseActivationCode:(NSString *)code {
@@ -312,10 +456,10 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     }
 
     NSString *upper = [code.uppercaseString stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    upper = [upper stringByReplacingOccurrencesOfString:@" " withString:@""];
-    upper = [upper stringByReplacingOccurrencesOfString:@"\n" withString:@""];
-    upper = [upper stringByReplacingOccurrencesOfString:@"\r" withString:@""];
-    upper = [upper stringByReplacingOccurrencesOfString:@"\t" withString:@""];
+    for (NSString *dash in @[@"\u2010", @"\u2011", @"\u2012", @"\u2013", @"\u2014", @"\u2212", @"\uFF0D"]) {
+        upper = [upper stringByReplacingOccurrencesOfString:dash withString:@"-"];
+    }
+    upper = [[upper componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] componentsJoinedByString:@""];
 
     NSArray<NSString *> *parts = [upper componentsSeparatedByString:@"-"];
     NSMutableArray<NSString *> *cleanParts = [NSMutableArray array];
@@ -332,19 +476,7 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
 
     if (cleanParts.count >= 2) {
         NSString *first = cleanParts[0];
-        if ([first isEqualToString:@"YP"] && cleanParts.count >= 3) {
-            prefix = @"YP";
-            expiry = [cleanParts[1] isEqualToString:@"PERM"] ? @"PERM" : cleanParts[1];
-            for (NSUInteger i = 2; i < cleanParts.count; i++) {
-                [signature appendString:cleanParts[i]];
-            }
-        } else if ([first isEqualToString:@"Y1"] && cleanParts.count >= 3) {
-            prefix = @"Y1";
-            expiry = cleanParts[1];
-            for (NSUInteger i = 2; i < cleanParts.count; i++) {
-                [signature appendString:cleanParts[i]];
-            }
-        } else if ([first isEqualToString:@"PERM"]) {
+        if ([first isEqualToString:@"PERM"]) {
             prefix = @"YP";
             expiry = @"PERM";
             for (NSUInteger i = 1; i < cleanParts.count; i++) {
@@ -361,15 +493,7 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
 
     if (!prefix) {
         NSString *compact = [self normalizedLicenseText:upper];
-        if (compact.length >= 22 && [compact hasPrefix:@"YPPERM"]) {
-            prefix = @"YP";
-            expiry = @"PERM";
-            [signature appendString:[compact substringFromIndex:6]];
-        } else if (compact.length >= 26 && [compact hasPrefix:@"Y1"]) {
-            prefix = @"Y1";
-            expiry = [compact substringWithRange:NSMakeRange(2, 8)];
-            [signature appendString:[compact substringFromIndex:10]];
-        } else if (compact.length >= 20 && [compact hasPrefix:@"PERM"]) {
+        if (compact.length >= 20 && [compact hasPrefix:@"PERM"]) {
             prefix = @"YP";
             expiry = @"PERM";
             [signature appendString:[compact substringFromIndex:4]];
@@ -422,13 +546,8 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     }
 
     for (NSString *device in [self deviceCodeCandidatesForSigning]) {
-        NSString *expected = [self expectedSignatureForDevice:device prefix:license.prefix expiry:license.expiry];
+        NSString *expected = [self expectedSignatureForSigningDevice:device prefix:license.prefix expiry:license.expiry];
         if ([license.signature isEqualToString:expected]) {
-            return YES;
-        }
-
-        NSString *legacy = [self legacyHexSignatureForDevice:device prefix:license.prefix expiry:license.expiry];
-        if ([license.signature isEqualToString:legacy]) {
             return YES;
         }
     }
@@ -448,26 +567,15 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     return [expiryDate compare:NSDate.date] == NSOrderedAscending;
 }
 
-- (NSString *)expectedSignatureForPrefix:(NSString *)prefix expiry:(NSString *)expiry {
-    return [self expectedSignatureForDevice:[self rawDeviceCode] prefix:prefix expiry:expiry];
-}
-
 - (NSString *)expectedSignatureForDevice:(NSString *)deviceCode prefix:(NSString *)prefix expiry:(NSString *)expiry {
     NSString *device = [self normalizedDeviceCodeForSigning:deviceCode];
+    return [self expectedSignatureForSigningDevice:device prefix:prefix expiry:expiry];
+}
+
+- (NSString *)expectedSignatureForSigningDevice:(NSString *)device prefix:(NSString *)prefix expiry:(NSString *)expiry {
     NSString *message = [NSString stringWithFormat:@"VCAM|v2|%@|%@|%@", device, prefix, expiry];
     NSData *digest = [self hmacSHA256DataForMessage:message];
     return [self safeSignatureFromDigest:digest length:16];
-}
-
-- (NSString *)legacyHexSignatureForPrefix:(NSString *)prefix expiry:(NSString *)expiry {
-    return [self legacyHexSignatureForDevice:[self rawDeviceCode] prefix:prefix expiry:expiry];
-}
-
-- (NSString *)legacyHexSignatureForDevice:(NSString *)deviceCode prefix:(NSString *)prefix expiry:(NSString *)expiry {
-    NSString *device = [self normalizedDeviceCodeForSigning:deviceCode];
-    NSString *message = [NSString stringWithFormat:@"VCAM|v2|%@|%@|%@", device, prefix, expiry];
-    NSString *hmac = [self hmacSHA256HexForMessage:message];
-    return [[hmac substringToIndex:16] uppercaseString];
 }
 
 - (NSArray<NSString *> *)deviceCodeCandidatesForSigning {
@@ -515,19 +623,6 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     return out;
 }
 
-- (NSString *)hmacSHA256HexForMessage:(NSString *)message {
-    NSData *keyData = [kVCamLicenseSecret dataUsingEncoding:NSUTF8StringEncoding];
-    NSData *messageData = [message dataUsingEncoding:NSUTF8StringEncoding];
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-    CCHmac(kCCHmacAlgSHA256, keyData.bytes, keyData.length, messageData.bytes, messageData.length, digest);
-
-    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
-    for (NSUInteger i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
-        [hex appendFormat:@"%02x", digest[i]];
-    }
-    return hex;
-}
-
 - (NSDate *)endOfDayForCompactDate:(NSString *)dateString {
     if (dateString.length != 8) {
         return nil;
@@ -567,7 +662,8 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
         NSUInteger len = MIN((NSUInteger)4, sig.length - i);
         [sigParts addObject:[sig substringWithRange:NSMakeRange(i, len)]];
     }
-    return [NSString stringWithFormat:@"%@-%@-%@", license.prefix, license.expiry, [sigParts componentsJoinedByString:@"-"]];
+    NSString *head = [license.prefix isEqualToString:@"YP"] ? @"PERM" : license.expiry;
+    return [NSString stringWithFormat:@"%@-%@", head, [sigParts componentsJoinedByString:@"-"]];
 }
 
 - (NSString *)normalizedAlphaNumeric:(NSString *)text {

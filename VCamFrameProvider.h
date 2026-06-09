@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)hasAnyVirtualSource;
 - (CGFloat)videoScale;
 - (void)setVideoScale:(CGFloat)scale;
+- (void)resetVideoScale;
 - (nullable NSData *)latestJPEGData;
 - (nullable NSData *)previewJPEGDataForSize:(CGSize)size;
 - (nullable NSData *)latestJPEGDataMatchingPhotoData:(NSData *)photoData;
