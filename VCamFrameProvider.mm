@@ -15,7 +15,6 @@ static NSString * const kVCamVideoMOVPath = @"/var/mobile/Library/VCam/source.mo
 static NSString * const kVCamVideoM4VPath = @"/var/mobile/Library/VCam/source.m4v";
 static NSString * const kVCamVideoAVIPath = @"/var/mobile/Library/VCam/source.avi";
 static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled";
-static NSString * const kVCamScalePath = @"/var/mobile/Library/VCam/video.scale";
 static CGFloat const kVCamDefaultVideoScale = 1.0;
 static CGFloat const kVCamMinVideoScale = 0.35;
 static CGFloat const kVCamMaxVideoScale = 3.0;
@@ -37,7 +36,6 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
 @property (nonatomic, assign) NSTimeInterval activationTime;
 @property (nonatomic, assign) BOOL lastPhotoPrefersPortrait;
 @property (nonatomic, assign) BOOL disabledInProcess;
-@property (nonatomic, assign) BOOL loadedVideoScale;
 @property (nonatomic, assign) CGFloat cachedVideoScale;
 @end
 
@@ -246,15 +244,6 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
 
 - (CGFloat)videoScale {
     @synchronized (self) {
-        if (!self.loadedVideoScale) {
-            NSString *stored = [NSString stringWithContentsOfFile:kVCamScalePath encoding:NSUTF8StringEncoding error:nil];
-            CGFloat value = stored.doubleValue;
-            if (value <= 0) {
-                value = kVCamDefaultVideoScale;
-            }
-            self.cachedVideoScale = [self clampedVideoScale:value];
-            self.loadedVideoScale = YES;
-        }
         return self.cachedVideoScale > 0 ? self.cachedVideoScale : kVCamDefaultVideoScale;
     }
 }
@@ -262,8 +251,6 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
 - (void)setVideoScale:(CGFloat)scale {
     @synchronized (self) {
         self.cachedVideoScale = [self clampedVideoScale:scale];
-        self.loadedVideoScale = YES;
-        [self saveVideoScale:self.cachedVideoScale];
     }
 }
 
@@ -272,20 +259,6 @@ static CGFloat const kVCamMaxVideoScale = 3.0;
         return kVCamDefaultVideoScale;
     }
     return MIN(MAX(scale, kVCamMinVideoScale), kVCamMaxVideoScale);
-}
-
-- (void)saveVideoScale:(CGFloat)scale {
-    NSFileManager *fm = NSFileManager.defaultManager;
-    [fm createDirectoryAtPath:@"/var/mobile/Library/VCam" withIntermediateDirectories:YES attributes:nil error:nil];
-    chmod("/var/mobile/Library/VCam", 0777);
-    NSString *value = [NSString stringWithFormat:@"%.4f", [self clampedVideoScale:scale]];
-    if (![fm fileExistsAtPath:kVCamScalePath]) {
-        [fm createFileAtPath:kVCamScalePath contents:nil attributes:nil];
-    }
-    chmod(kVCamScalePath.UTF8String, 0666);
-    if ([value writeToFile:kVCamScalePath atomically:NO encoding:NSUTF8StringEncoding error:nil]) {
-        chmod(kVCamScalePath.UTF8String, 0666);
-    }
 }
 
 - (nullable NSURL *)currentVideoURL {

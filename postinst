@@ -5,7 +5,6 @@ VCAM_DIR="/var/mobile/Library/VCam"
 DEVICE_ID="$VCAM_DIR/device.id"
 LICENSE_KEY="$VCAM_DIR/license.key"
 TRIAL_START="$VCAM_DIR/trial.start"
-VIDEO_SCALE="$VCAM_DIR/video.scale"
 
 mkdir -p "$VCAM_DIR"
 
@@ -24,17 +23,13 @@ if [ ${#CURRENT_DEVICE_ID} -lt 16 ] || echo "$CURRENT_DEVICE_ID" | grep -q '^VCA
     fi
 fi
 
-touch "$LICENSE_KEY" "$TRIAL_START" "$VIDEO_SCALE" >/dev/null 2>&1 || true
-if [ ! -s "$VIDEO_SCALE" ]; then
-    echo "1.0" > "$VIDEO_SCALE" 2>/dev/null || true
-fi
+touch "$LICENSE_KEY" "$TRIAL_START" >/dev/null 2>&1 || true
 
 chown -R mobile:mobile "$VCAM_DIR" >/dev/null 2>&1 || true
 chmod 0777 "$VCAM_DIR" >/dev/null 2>&1 || true
 chmod 0666 "$DEVICE_ID" >/dev/null 2>&1 || true
 chmod 0666 "$LICENSE_KEY" >/dev/null 2>&1 || true
 chmod 0666 "$TRIAL_START" >/dev/null 2>&1 || true
-chmod 0666 "$VIDEO_SCALE" >/dev/null 2>&1 || true
 chmod 0666 "$VCAM_DIR"/source.* >/dev/null 2>&1 || true
 
 PLIST="/var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist"

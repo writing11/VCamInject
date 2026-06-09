@@ -14,6 +14,7 @@ static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.s
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static NSString *gVCamCachedDeviceCode = nil;
+static NSTimeInterval gVCamCachedTrialStart = 0;
 
 @interface VCamParsedLicense : NSObject
 @property (nonatomic, copy) NSString *prefix;
@@ -99,13 +100,17 @@ static NSString *gVCamCachedDeviceCode = nil;
         return @"\u8bd5\u7528\u5df2\u7ed3\u675f\uff0c\u8bf7\u6fc0\u6d3b";
     }
 
-    NSInteger minutes = (NSInteger)ceil(remaining / 60.0);
-    NSInteger hours = minutes / 60;
-    NSInteger mins = minutes % 60;
+    NSInteger totalSeconds = MAX((NSInteger)1, (NSInteger)floor(remaining));
+    NSInteger hours = totalSeconds / 3600;
+    NSInteger mins = (totalSeconds % 3600) / 60;
+    NSInteger secs = totalSeconds % 60;
     if (hours > 0) {
-        return [NSString stringWithFormat:@"\u8bd5\u7528\u5269\u4f59\uff1a%ld\u5c0f\u65f6%ld\u5206\u949f", (long)hours, (long)mins];
+        return [NSString stringWithFormat:@"\u8bd5\u7528\u5269\u4f59\uff1a%ld\u5c0f\u65f6%ld\u5206%ld\u79d2", (long)hours, (long)mins, (long)secs];
     }
-    return [NSString stringWithFormat:@"\u8bd5\u7528\u5269\u4f59\uff1a%ld\u5206\u949f", (long)MAX((NSInteger)1, mins)];
+    if (mins > 0) {
+        return [NSString stringWithFormat:@"\u8bd5\u7528\u5269\u4f59\uff1a%ld\u5206%ld\u79d2", (long)mins, (long)secs];
+    }
+    return [NSString stringWithFormat:@"\u8bd5\u7528\u5269\u4f59\uff1a%ld\u79d2", (long)secs];
 }
 
 - (BOOL)activateWithCode:(NSString *)code {
@@ -201,11 +206,20 @@ static NSString *gVCamCachedDeviceCode = nil;
 }
 
 - (NSTimeInterval)trialStartTimeCreatingIfNeeded:(BOOL)createIfNeeded {
+    @synchronized (VCamLicense.class) {
+        if (gVCamCachedTrialStart > 0) {
+            return gVCamCachedTrialStart;
+        }
+    }
+
     [self ensureLicenseDirectory];
 
     NSString *stored = [NSString stringWithContentsOfFile:kVCamTrialStartPath encoding:NSUTF8StringEncoding error:nil];
     NSTimeInterval start = stored.doubleValue;
     if (start > 0) {
+        @synchronized (VCamLicense.class) {
+            gVCamCachedTrialStart = start;
+        }
         return start;
     }
 
@@ -214,6 +228,9 @@ static NSString *gVCamCachedDeviceCode = nil;
     }
 
     start = [NSDate.date timeIntervalSince1970];
+    @synchronized (VCamLicense.class) {
+        gVCamCachedTrialStart = start;
+    }
     [self saveTrialStartTimeIfPossible:start];
     return start;
 }
@@ -225,6 +242,10 @@ static NSString *gVCamCachedDeviceCode = nil;
 
     [self ensureLicenseDirectory];
     NSString *value = [NSString stringWithFormat:@"%.0f", start];
+    if (![NSFileManager.defaultManager fileExistsAtPath:kVCamTrialStartPath]) {
+        [NSFileManager.defaultManager createFileAtPath:kVCamTrialStartPath contents:nil attributes:nil];
+    }
+    chmod(kVCamTrialStartPath.UTF8String, 0666);
     BOOL ok = [value writeToFile:kVCamTrialStartPath atomically:NO encoding:NSUTF8StringEncoding error:nil];
     if (ok) {
         chmod(kVCamTrialStartPath.UTF8String, 0666);
@@ -297,26 +318,68 @@ static NSString *gVCamCachedDeviceCode = nil;
     upper = [upper stringByReplacingOccurrencesOfString:@"\t" withString:@""];
 
     NSArray<NSString *> *parts = [upper componentsSeparatedByString:@"-"];
+    NSMutableArray<NSString *> *cleanParts = [NSMutableArray array];
+    for (NSString *part in parts) {
+        NSString *clean = [self normalizedLicenseText:part];
+        if (clean.length > 0) {
+            [cleanParts addObject:clean];
+        }
+    }
+
     NSString *prefix = nil;
     NSString *expiry = nil;
     NSMutableString *signature = [NSMutableString string];
 
-    if (parts.count >= 3) {
-        prefix = parts[0];
-        expiry = [self normalizedLicenseText:parts[1]];
-        for (NSUInteger i = 2; i < parts.count; i++) {
-            [signature appendString:[self normalizedLicenseText:parts[i]]];
+    if (cleanParts.count >= 2) {
+        NSString *first = cleanParts[0];
+        if ([first isEqualToString:@"YP"] && cleanParts.count >= 3) {
+            prefix = @"YP";
+            expiry = [cleanParts[1] isEqualToString:@"PERM"] ? @"PERM" : cleanParts[1];
+            for (NSUInteger i = 2; i < cleanParts.count; i++) {
+                [signature appendString:cleanParts[i]];
+            }
+        } else if ([first isEqualToString:@"Y1"] && cleanParts.count >= 3) {
+            prefix = @"Y1";
+            expiry = cleanParts[1];
+            for (NSUInteger i = 2; i < cleanParts.count; i++) {
+                [signature appendString:cleanParts[i]];
+            }
+        } else if ([first isEqualToString:@"PERM"]) {
+            prefix = @"YP";
+            expiry = @"PERM";
+            for (NSUInteger i = 1; i < cleanParts.count; i++) {
+                [signature appendString:cleanParts[i]];
+            }
+        } else if ([self isCompactDateString:first]) {
+            prefix = @"Y1";
+            expiry = first;
+            for (NSUInteger i = 1; i < cleanParts.count; i++) {
+                [signature appendString:cleanParts[i]];
+            }
         }
-    } else {
+    }
+
+    if (!prefix) {
         NSString *compact = [self normalizedLicenseText:upper];
-        if (compact.length >= 22 && [[compact substringToIndex:2] isEqualToString:@"YP"]) {
+        if (compact.length >= 22 && [compact hasPrefix:@"YPPERM"]) {
             prefix = @"YP";
             expiry = @"PERM";
             [signature appendString:[compact substringFromIndex:6]];
-        } else if (compact.length >= 26) {
-            prefix = [compact substringToIndex:2];
+        } else if (compact.length >= 26 && [compact hasPrefix:@"Y1"]) {
+            prefix = @"Y1";
             expiry = [compact substringWithRange:NSMakeRange(2, 8)];
             [signature appendString:[compact substringFromIndex:10]];
+        } else if (compact.length >= 20 && [compact hasPrefix:@"PERM"]) {
+            prefix = @"YP";
+            expiry = @"PERM";
+            [signature appendString:[compact substringFromIndex:4]];
+        } else if (compact.length >= 24) {
+            NSString *date = [compact substringToIndex:8];
+            if ([self isCompactDateString:date]) {
+                prefix = @"Y1";
+                expiry = date;
+                [signature appendString:[compact substringFromIndex:8]];
+            }
         }
     }
 
@@ -333,6 +396,13 @@ static NSString *gVCamCachedDeviceCode = nil;
 
 - (BOOL)isSupportedPrefix:(NSString *)prefix {
     return [prefix isEqualToString:@"Y1"] || [prefix isEqualToString:@"YP"];
+}
+
+- (BOOL)isCompactDateString:(NSString *)value {
+    if (value.length != 8) {
+        return NO;
+    }
+    return [value rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location == NSNotFound;
 }
 
 - (BOOL)isParsedLicenseValid:(VCamParsedLicense *)license allowExpired:(BOOL)allowExpired {

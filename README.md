@@ -10,7 +10,7 @@ RootHide/rootless iOS camera replacement tweak.
 - Replaces camera sample buffers with a selected phone-album video or PC raw-frame stream.
 - Exactly two-finger double tap shows or hides a floating black/gold `V` button.
 - Tap the floating `V` button to open the control menu.
-- When the floating `V` button is visible, pinch with two fingers on the screen to adjust virtual video size. The size is saved globally for all apps.
+- When the floating `V` button is visible, pinch with two fingers on the screen to adjust virtual video size. The size only applies to the current app session and resets to 100% after reopening the app.
 - `Choose video and replace` opens the iOS video picker and enables replacement immediately after selection.
 - `Restore real camera` disables replacement and returns the app to the real camera.
 - Uses `PHPickerViewController`, so it avoids the common crash caused by host apps missing `NSPhotoLibraryUsageDescription`.
