@@ -209,7 +209,7 @@ static NSString * const kVCamDisabledPath = @"/var/mobile/Library/VCam/disabled"
 }
 
 - (BOOL)isVirtualCameraEnabled {
-    if (![[VCamLicense sharedLicense] isActivated]) {
+    if (![[VCamLicense sharedLicense] canUseVirtualCamera]) {
         return NO;
     }
     if (self.disabledInProcess) {

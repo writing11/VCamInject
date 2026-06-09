@@ -6,6 +6,8 @@
 - (NSString *)deviceCode;
 - (NSString *)activationStatusText;
 - (BOOL)isActivated;
+- (BOOL)canUseVirtualCamera;
+- (BOOL)isTrialActive;
 - (BOOL)activateWithCode:(NSString *)code;
 - (void)clearActivation;
 

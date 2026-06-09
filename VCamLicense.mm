@@ -4,13 +4,17 @@
 #import <CommonCrypto/CommonHMAC.h>
 #import <UIKit/UIKit.h>
 #import <dlfcn.h>
+#import <math.h>
 #import <sys/stat.h>
 
 static NSString * const kVCamLicenseDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
 static NSString * const kVCamLicensePath = @"/var/mobile/Library/VCam/license.key";
+static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.start";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.device.id";
+static NSString * const kVCamDefaultsTrialStartKey = @"com.qianmian.vcaminject.trial.start";
+static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 
 @interface VCamParsedLicense : NSObject
 @property (nonatomic, copy) NSString *prefix;
@@ -45,26 +49,64 @@ static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.devic
 - (NSString *)activationStatusText {
     VCamParsedLicense *license = [self parsedLicenseFromStoredCode];
     if (!license) {
-        return @"未激活";
+        if ([self isTrialActive]) {
+            return [self trialStatusText];
+        }
+        return @"\u8bd5\u7528\u5df2\u7ed3\u675f\uff0c\u8bf7\u6fc0\u6d3b";
     }
 
     if (![self isParsedLicenseValid:license allowExpired:NO]) {
         if ([self isParsedLicenseExpired:license]) {
-            return @"授权已过期";
+            return @"\u6388\u6743\u5df2\u8fc7\u671f";
         }
-        return @"未激活";
+        if ([self isTrialActive]) {
+            return [self trialStatusText];
+        }
+        return @"\u672a\u6fc0\u6d3b";
     }
 
     if ([license.prefix isEqualToString:@"YP"]) {
-        return @"永久授权";
+        return @"\u6c38\u4e45\u6388\u6743";
     }
 
-    return [NSString stringWithFormat:@"授权到期：%@", [self displayDateFromCompactDate:license.expiry]];
+    return [NSString stringWithFormat:@"\u6388\u6743\u5230\u671f\uff1a%@", [self displayDateFromCompactDate:license.expiry]];
 }
 
 - (BOOL)isActivated {
     VCamParsedLicense *license = [self parsedLicenseFromStoredCode];
     return license && [self isParsedLicenseValid:license allowExpired:NO];
+}
+
+- (BOOL)canUseVirtualCamera {
+    return [self isActivated] || [self isTrialActive];
+}
+
+- (BOOL)isTrialActive {
+    if ([self isActivated]) {
+        return NO;
+    }
+
+    NSTimeInterval start = [self trialStartTimeCreatingIfNeeded:YES];
+    if (start <= 0) {
+        return NO;
+    }
+    return [NSDate.date timeIntervalSince1970] - start < kVCamTrialDuration;
+}
+
+- (NSString *)trialStatusText {
+    NSTimeInterval start = [self trialStartTimeCreatingIfNeeded:YES];
+    NSTimeInterval remaining = kVCamTrialDuration - ([NSDate.date timeIntervalSince1970] - start);
+    if (remaining <= 0) {
+        return @"\u8bd5\u7528\u5df2\u7ed3\u675f\uff0c\u8bf7\u6fc0\u6d3b";
+    }
+
+    NSInteger minutes = (NSInteger)ceil(remaining / 60.0);
+    NSInteger hours = minutes / 60;
+    NSInteger mins = minutes % 60;
+    if (hours > 0) {
+        return [NSString stringWithFormat:@"\u8bd5\u7528\u5269\u4f59\uff1a%ld\u5c0f\u65f6%ld\u5206\u949f", (long)hours, (long)mins];
+    }
+    return [NSString stringWithFormat:@"\u8bd5\u7528\u5269\u4f59\uff1a%ld\u5206\u949f", (long)MAX((NSInteger)1, mins)];
 }
 
 - (BOOL)activateWithCode:(NSString *)code {
@@ -148,6 +190,46 @@ static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.devic
 
     [NSUserDefaults.standardUserDefaults setObject:deviceCode forKey:kVCamDefaultsDeviceKey];
     [NSUserDefaults.standardUserDefaults synchronize];
+}
+
+- (NSTimeInterval)trialStartTimeCreatingIfNeeded:(BOOL)createIfNeeded {
+    [self ensureLicenseDirectory];
+
+    NSString *stored = [NSString stringWithContentsOfFile:kVCamTrialStartPath encoding:NSUTF8StringEncoding error:nil];
+    NSTimeInterval start = stored.doubleValue;
+    if (start > 0) {
+        return start;
+    }
+
+    start = [NSUserDefaults.standardUserDefaults doubleForKey:kVCamDefaultsTrialStartKey];
+    if (start > 0) {
+        [self saveTrialStartTimeIfPossible:start];
+        return start;
+    }
+
+    if (!createIfNeeded) {
+        return 0;
+    }
+
+    start = [NSDate.date timeIntervalSince1970];
+    [NSUserDefaults.standardUserDefaults setDouble:start forKey:kVCamDefaultsTrialStartKey];
+    [NSUserDefaults.standardUserDefaults synchronize];
+    [self saveTrialStartTimeIfPossible:start];
+    return start;
+}
+
+- (BOOL)saveTrialStartTimeIfPossible:(NSTimeInterval)start {
+    if (start <= 0) {
+        return NO;
+    }
+
+    [self ensureLicenseDirectory];
+    NSString *value = [NSString stringWithFormat:@"%.0f", start];
+    BOOL ok = [value writeToFile:kVCamTrialStartPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    if (ok) {
+        chmod(kVCamTrialStartPath.UTF8String, 0666);
+    }
+    return ok;
 }
 
 - (NSString *)stableSystemDeviceCode {
@@ -255,7 +337,7 @@ static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.devic
 }
 
 - (BOOL)isSupportedPrefix:(NSString *)prefix {
-    return [prefix isEqualToString:@"Y7"] || [prefix isEqualToString:@"Y1"] || [prefix isEqualToString:@"YP"];
+    return [prefix isEqualToString:@"Y1"] || [prefix isEqualToString:@"YP"];
 }
 
 - (BOOL)isParsedLicenseValid:(VCamParsedLicense *)license allowExpired:(BOOL)allowExpired {
@@ -264,7 +346,7 @@ static NSString * const kVCamDefaultsDeviceKey = @"com.qianmian.vcaminject.devic
     }
 
     if (![license.prefix isEqualToString:@"YP"]) {
-        if (license.expiry.length != 8 || (![license.prefix isEqualToString:@"Y7"] && ![license.prefix isEqualToString:@"Y1"])) {
+        if (license.expiry.length != 8 || ![license.prefix isEqualToString:@"Y1"]) {
             return NO;
         }
         if (!allowExpired && [self isParsedLicenseExpired:license]) {

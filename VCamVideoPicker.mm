@@ -91,12 +91,13 @@
         return;
     }
 
-    if (![[VCamLicense sharedLicense] isActivated]) {
+    if (![[VCamLicense sharedLicense] canUseVirtualCamera]) {
         [self showActivationMenuFromController:top];
         return;
     }
 
-    NSString *status = [[VCamLicense sharedLicense] activationStatusText];
+    VCamLicense *license = [VCamLicense sharedLicense];
+    NSString *status = [license activationStatusText];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"VCam"
                                                                    message:[NSString stringWithFormat:@"%@\n%@", VCamText("\u865a\u62df\u76f8\u673a\u63a7\u5236"), status]
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
@@ -112,6 +113,14 @@
                                             handler:^(__unused UIAlertAction *action) {
         [[VCamFrameProvider sharedProvider] disableVirtualCamera];
         [self showMessage:VCamText("\u5df2\u6062\u590d\u539f\u76f8\u673a") from:top];
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u8f93\u5165\u6fc0\u6d3b\u7801")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showActivationInputFromController:top];
+        });
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:VCamText("\u9690\u85cf\u60ac\u6d6e\u6309\u94ae")
@@ -146,7 +155,7 @@
         return;
     }
 
-    if (![[VCamLicense sharedLicense] isActivated]) {
+    if (![[VCamLicense sharedLicense] canUseVirtualCamera]) {
         [self showActivationMenuFromController:top];
         return;
     }
@@ -170,7 +179,7 @@
 - (void)showActivationMenuFromController:(UIViewController *)controller {
     VCamLicense *license = [VCamLicense sharedLicense];
     NSString *message = [NSString stringWithFormat:@"%@\n\n%@\n%@",
-                         VCamText("\u6b64\u7248\u672c\u9700\u8981\u6fc0\u6d3b\u540e\u624d\u80fd\u4f7f\u7528"),
+                         VCamText("\u8bd5\u7528\u5df2\u7ed3\u675f\uff0c\u8bf7\u6fc0\u6d3b\u540e\u7ee7\u7eed\u4f7f\u7528"),
                          VCamText("\u8bbe\u5907\u7801\uff1a"),
                          [license deviceCode]];
 
@@ -212,7 +221,7 @@
                                                             preferredStyle:UIAlertControllerStyleAlert];
 
     [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"Y7 / Y1 / YP";
+        textField.placeholder = VCamText("\u8bf7\u8f93\u5165\u6fc0\u6d3b\u7801");
         textField.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
         textField.autocorrectionType = UITextAutocorrectionTypeNo;
         textField.clearButtonMode = UITextFieldViewModeWhileEditing;
