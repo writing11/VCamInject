@@ -179,8 +179,6 @@ if [ -d /var/jb ] || [ -d /var/jb/Library ]; then
     P="$(write_plist "/var/jb/Library/LaunchDaemons" || true)"
     [ -n "$P" ] && PLISTS="$PLISTS $P"
 fi
-P="$(write_plist "/Library/LaunchDaemons" || true)"
-[ -n "$P" ] && PLISTS="$PLISTS $P"
 
 AGENTS=""
 if [ -n "$JBROOT" ] && [ -d "$JBROOT" ]; then
@@ -191,8 +189,6 @@ if [ -d /var/jb ] || [ -d /var/jb/Library ]; then
     P="$(write_agent_plist "/var/jb/Library/LaunchAgents" || true)"
     [ -n "$P" ] && AGENTS="$AGENTS $P"
 fi
-P="$(write_agent_plist "/Library/LaunchAgents" || true)"
-[ -n "$P" ] && AGENTS="$AGENTS $P"
 
 launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
 for PLIST in $PLISTS; do
