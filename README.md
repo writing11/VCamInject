@@ -70,7 +70,7 @@ This version stores activation and trial time globally through `vcamreceiverd`. 
 /var/mobile/Library/VCam/device.id
 ```
 
-Injected apps read and write those values through the daemon first, so one activation and one 2-hour trial timer are shared across all injected apps. A named-pasteboard backup and an app-local fallback are still kept only as emergency fallback when the daemon is not running. If every phone shows the same device code, or the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions.
+Injected apps read and write those values only through the daemon and the shared files above, so one activation and one 2-hour trial timer are shared across all injected apps. This build no longer writes activation or trial state into each host app's own defaults. If activation works in one app but not another, reinstall this package so the install script can recreate `device.id`, repair folder permissions, and restart `vcamreceiverd`.
 
 ## Priority Order
 

@@ -2,7 +2,6 @@
 
 #import <CommonCrypto/CommonDigest.h>
 #import <CommonCrypto/CommonHMAC.h>
-#import <UIKit/UIKit.h>
 #import <arpa/inet.h>
 #import <dlfcn.h>
 #import <errno.h>
@@ -17,11 +16,9 @@ static NSString * const kVCamLicenseDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
 static NSString * const kVCamLicensePath = @"/var/mobile/Library/VCam/license.key";
 static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.start";
-static NSString * const kVCamDefaultsSuiteName = @"com.qianmian.vcam";
 static NSString * const kVCamDefaultsDeviceKey = @"device.id";
 static NSString * const kVCamDefaultsLicenseKey = @"license.key";
 static NSString * const kVCamDefaultsTrialStartKey = @"trial.start";
-static NSString * const kVCamPasteboardName = @"com.qianmian.vcam.store";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static const int kVCamDaemonPort = 9999;
@@ -240,16 +237,18 @@ static int VCamOpenControlSocket(void) {
     }
 
     NSString *canonical = [self canonicalCodeForLicense:license];
+    BOOL saved = [self writePersistentString:canonical filePath:kVCamLicensePath defaultsKey:kVCamDefaultsLicenseKey];
+    if (!saved) {
+        return NO;
+    }
+
     @synchronized (VCamLicense.class) {
         gVCamCachedLicenseCode = [canonical copy];
     }
-
-    BOOL saved = [self writePersistentString:canonical filePath:kVCamLicensePath defaultsKey:kVCamDefaultsLicenseKey];
     VCamParsedLicense *savedLicense = [self parsedLicenseFromStoredCode];
-    return saved ||
-           (savedLicense &&
-            [self isParsedLicenseValid:savedLicense allowExpired:NO] &&
-            [[self canonicalCodeForLicense:savedLicense] isEqualToString:canonical]);
+    return savedLicense &&
+           [self isParsedLicenseValid:savedLicense allowExpired:NO] &&
+           [[self canonicalCodeForLicense:savedLicense] isEqualToString:canonical];
 }
 
 - (void)clearActivation {
@@ -263,8 +262,13 @@ static int VCamOpenControlSocket(void) {
 - (NSString *)rawDeviceCode {
     [self ensureLicenseDirectory];
 
-    NSString *fallback = [self persistentDefaultsStringForKey:kVCamDefaultsDeviceKey];
-    NSString *normalized = [self normalizedAlphaNumeric:fallback];
+    NSString *cached = [self normalizedAlphaNumeric:gVCamCachedDeviceCode];
+    if (cached.length >= 16) {
+        return cached;
+    }
+
+    NSString *global = [self persistentDefaultsStringForKey:kVCamDefaultsDeviceKey];
+    NSString *normalized = [self normalizedAlphaNumeric:global];
     if (normalized.length >= 16) {
         [self saveDeviceCodeIfPossible:normalized];
         return [self cacheAndReturnDeviceCode:normalized];
@@ -273,13 +277,8 @@ static int VCamOpenControlSocket(void) {
     NSString *stored = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
     normalized = [self normalizedAlphaNumeric:stored];
     if (normalized.length >= 16) {
+        [self saveDeviceCodeIfPossible:normalized];
         return [self cacheAndReturnDeviceCode:normalized];
-    }
-
-    NSString *cached = [self normalizedAlphaNumeric:gVCamCachedDeviceCode];
-    if (cached.length >= 16) {
-        [self saveDeviceCodeIfPossible:cached];
-        return cached;
     }
 
     NSString *systemCode = [self stableSystemDeviceCode];
@@ -314,11 +313,25 @@ static int VCamOpenControlSocket(void) {
     chmod(kVCamLicenseDir.UTF8String, 0777);
 }
 
+- (NSString *)filePathForPersistentKey:(NSString *)key {
+    if ([key isEqualToString:kVCamDefaultsDeviceKey]) {
+        return kVCamDevicePath;
+    }
+    if ([key isEqualToString:kVCamDefaultsLicenseKey]) {
+        return kVCamLicensePath;
+    }
+    if ([key isEqualToString:kVCamDefaultsTrialStartKey]) {
+        return kVCamTrialStartPath;
+    }
+    return nil;
+}
+
 - (BOOL)writePersistentString:(NSString *)value filePath:(NSString *)filePath defaultsKey:(NSString *)key {
     if (value.length == 0 || key.length == 0) {
         return NO;
     }
 
+    BOOL wroteDaemon = [self writeDaemonString:value forKey:key];
     BOOL wroteFile = NO;
     if (filePath.length > 0) {
         [self ensureLicenseDirectory];
@@ -332,17 +345,7 @@ static int VCamOpenControlSocket(void) {
         }
     }
 
-    BOOL wroteDaemon = [self writeDaemonString:value forKey:key];
-    BOOL wrotePasteboard = [self writePasteboardString:value forKey:key];
-
-    NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
-    [suite setObject:value forKey:key];
-    BOOL wroteSuite = [suite synchronize];
-
-    [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
-    BOOL wroteStandard = [NSUserDefaults.standardUserDefaults synchronize];
-
-    return wroteFile || wroteDaemon || wrotePasteboard || wroteSuite || wroteStandard;
+    return wroteDaemon || wroteFile;
 }
 
 - (NSString *)persistentDefaultsStringForKey:(NSString *)key {
@@ -351,29 +354,17 @@ static int VCamOpenControlSocket(void) {
         return value;
     }
 
-    value = [self pasteboardStringForKey:key];
-    if (value.length > 0) {
-        return value;
-    }
-
-    NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
-    value = [suite stringForKey:key];
-    if (value.length > 0) {
-        return value;
-    }
-
-    value = [NSUserDefaults.standardUserDefaults stringForKey:key];
+    NSString *filePath = [self filePathForPersistentKey:key];
+    value = filePath.length > 0 ? [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:nil] : nil;
     return value.length > 0 ? value : nil;
 }
 
 - (void)removePersistentDefaultsValueForKey:(NSString *)key {
     [self removeDaemonStringForKey:key];
-    [self removePasteboardStringForKey:key];
-    NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
-    [suite removeObjectForKey:key];
-    [suite synchronize];
-    [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
-    [NSUserDefaults.standardUserDefaults synchronize];
+    NSString *filePath = [self filePathForPersistentKey:key];
+    if (filePath.length > 0) {
+        [NSFileManager.defaultManager removeItemAtPath:filePath error:nil];
+    }
 }
 
 - (NSString *)daemonStringForKey:(NSString *)key {
@@ -449,59 +440,6 @@ static int VCamOpenControlSocket(void) {
     close(fd);
 }
 
-- (BOOL)writePasteboardString:(NSString *)value forKey:(NSString *)key {
-    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
-    store[key] = value;
-    return [self savePasteboardStore:store];
-}
-
-- (NSString *)pasteboardStringForKey:(NSString *)key {
-    return [self pasteboardStore][key];
-}
-
-- (void)removePasteboardStringForKey:(NSString *)key {
-    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
-    [store removeObjectForKey:key];
-    [self savePasteboardStore:store];
-}
-
-- (NSMutableDictionary<NSString *, NSString *> *)pasteboardStore {
-    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
-    NSString *payload = pasteboard.string ?: @"";
-    NSMutableDictionary<NSString *, NSString *> *store = [NSMutableDictionary dictionary];
-    for (NSString *line in [payload componentsSeparatedByString:@"\n"]) {
-        NSRange sep = [line rangeOfString:@"="];
-        if (sep.location == NSNotFound || sep.location == 0) {
-            continue;
-        }
-        NSString *key = [line substringToIndex:sep.location];
-        NSString *value = [line substringFromIndex:sep.location + sep.length];
-        if (key.length > 0 && value.length > 0) {
-            store[key] = value;
-        }
-    }
-    return store;
-}
-
-- (BOOL)savePasteboardStore:(NSDictionary<NSString *, NSString *> *)store {
-    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
-    NSMutableArray<NSString *> *lines = [NSMutableArray array];
-    for (NSString *key in store.allKeys) {
-        NSString *value = store[key];
-        if (key.length > 0 && value.length > 0) {
-            [lines addObject:[NSString stringWithFormat:@"%@=%@", key, value]];
-        }
-    }
-    pasteboard.string = [lines componentsJoinedByString:@"\n"];
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if ([pasteboard respondsToSelector:@selector(setPersistent:)]) {
-        pasteboard.persistent = YES;
-    }
-#pragma clang diagnostic pop
-    return pasteboard.string.length > 0 || store.count == 0;
-}
-
 - (BOOL)saveDeviceCodeIfPossible:(NSString *)deviceCode {
     if (deviceCode.length < 16) {
         return NO;
@@ -547,10 +485,13 @@ static int VCamOpenControlSocket(void) {
     }
 
     start = [NSDate.date timeIntervalSince1970];
+    if (![self saveTrialStartTimeIfPossible:start]) {
+        return 0;
+    }
+
     @synchronized (VCamLicense.class) {
         gVCamCachedTrialStart = start;
     }
-    [self saveTrialStartTimeIfPossible:start];
     return start;
 }
 
