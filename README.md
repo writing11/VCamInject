@@ -149,7 +149,7 @@ Download the `VCamInject-roothide-deb` artifact after the action succeeds.
 Install the generated `.deb` with Sileo, Zebra, Filza, or:
 
 ```sh
-dpkg -i com.qianmian.vcaminject_*.deb
+dpkg -i com.dingzhi.vcaminject_*.deb
 ```
 
 Then restart the target app. If injection does not refresh, respring.

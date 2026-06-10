@@ -1,9 +1,11 @@
-Package: com.qianmian.vcaminject
+Package: com.dingzhi.vcaminject
 Name: VCam
-Version: 0.3.1
+Version: 0.3.2
 Architecture: iphoneos-arm64
 Description: Installable virtual camera package with global daemon state.
-Maintainer: qianmian
-Author: qianmian
+Maintainer: dingzhi
+Author: dingzhi
 Section: Tweaks
 Depends: mobilesubstrate, firmware (>= 14.0)
+Replaces: com.qianmian.vcaminject
+Conflicts: com.qianmian.vcaminject
