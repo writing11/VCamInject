@@ -54,23 +54,21 @@ if [ -z "$BIN" ] && command -v vcamreceiverd >/dev/null 2>&1; then
 fi
 
 if [ -z "$BIN" ]; then
+    BIN="$(find /var/jb /private/preboot /var/containers -path '*usr/local/bin/vcamreceiverd' -type f 2>/dev/null | head -n 1 || true)"
+fi
+
+if [ -z "$BIN" ]; then
     BIN="/var/jb/usr/local/bin/vcamreceiverd"
 fi
 
 chmod 0755 "$BIN" >/dev/null 2>&1 || true
 
-PLIST_DIR=""
-if [ -n "$JBROOT" ] && [ -d "$JBROOT" ]; then
-    PLIST_DIR="$JBROOT/Library/LaunchDaemons"
-elif [ -d /var/jb ] || [ -d /var/jb/Library ]; then
-    PLIST_DIR="/var/jb/Library/LaunchDaemons"
-else
-    PLIST_DIR="/Library/LaunchDaemons"
-fi
-mkdir -p "$PLIST_DIR"
-PLIST="$PLIST_DIR/com.qianmian.vcamreceiver.plist"
-
-cat > "$PLIST" <<EOF
+write_plist() {
+    PLIST_DIR="$1"
+    [ -n "$PLIST_DIR" ] || return 1
+    mkdir -p "$PLIST_DIR" >/dev/null 2>&1 || return 1
+    PLIST="$PLIST_DIR/com.qianmian.vcamreceiver.plist"
+    cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -92,11 +90,40 @@ cat > "$PLIST" <<EOF
 </dict>
 </plist>
 EOF
+    chmod 0644 "$PLIST" >/dev/null 2>&1 || true
+    echo "$PLIST"
+    return 0
+}
 
-chmod 0644 "$PLIST" >/dev/null 2>&1 || true
+PLISTS=""
+if [ -n "$JBROOT" ] && [ -d "$JBROOT" ]; then
+    P="$(write_plist "$JBROOT/Library/LaunchDaemons" || true)"
+    [ -n "$P" ] && PLISTS="$PLISTS $P"
+fi
+if [ -d /var/jb ] || [ -d /var/jb/Library ]; then
+    P="$(write_plist "/var/jb/Library/LaunchDaemons" || true)"
+    [ -n "$P" ] && PLISTS="$PLISTS $P"
+fi
+P="$(write_plist "/Library/LaunchDaemons" || true)"
+[ -n "$P" ] && PLISTS="$PLISTS $P"
+
 launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
-launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
-launchctl bootstrap system "$PLIST" >/dev/null 2>&1 || true
+for PLIST in $PLISTS; do
+    launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
+    launchctl bootstrap system "$PLIST" >/dev/null 2>&1 || true
+done
 launchctl kickstart -k system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+
+sleep 1
+if [ -x "$BIN" ]; then
+    if ! pgrep -f "vcamreceiverd" >/dev/null 2>&1; then
+        "$BIN" >> "$VCAM_DIR/vcamreceiver.log" 2>> "$VCAM_DIR/vcamreceiver.err" &
+        echo "$!" > "$VCAM_DIR/vcamreceiver.pid" 2>/dev/null || true
+    fi
+fi
+
+chmod 0666 "$VCAM_DIR"/vcamreceiver.* >/dev/null 2>&1 || true
+pgrep -f "vcamreceiverd" > "$VCAM_DIR/vcamreceiver.running" 2>/dev/null || true
+chmod 0666 "$VCAM_DIR"/vcamreceiver.running >/dev/null 2>&1 || true
 
 exit 0

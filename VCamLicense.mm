@@ -2,6 +2,7 @@
 
 #import <CommonCrypto/CommonDigest.h>
 #import <CommonCrypto/CommonHMAC.h>
+#import <UIKit/UIKit.h>
 #import <arpa/inet.h>
 #import <dlfcn.h>
 #import <errno.h>
@@ -9,6 +10,7 @@
 #import <netinet/in.h>
 #import <sys/socket.h>
 #import <sys/stat.h>
+#import <sys/utsname.h>
 #import <string.h>
 #import <unistd.h>
 
@@ -19,6 +21,7 @@ static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.s
 static NSString * const kVCamDefaultsDeviceKey = @"device.id";
 static NSString * const kVCamDefaultsLicenseKey = @"license.key";
 static NSString * const kVCamDefaultsTrialStartKey = @"trial.start";
+static NSString * const kVCamPasteboardName = @"com.qianmian.vcam.global.store";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static const int kVCamDaemonPort = 9999;
@@ -142,6 +145,13 @@ static int VCamOpenControlSocket(void) {
 @implementation VCamParsedLicense
 @end
 
+@interface VCamLicense ()
+- (NSString *)rawDeviceCode;
+- (NSString *)stableSystemDeviceCode;
+- (NSString *)publicProfileDeviceCode;
+- (NSString *)lastResortDeviceCode;
+@end
+
 @implementation VCamLicense
 
 + (instancetype)sharedLicense {
@@ -156,7 +166,7 @@ static int VCamOpenControlSocket(void) {
 - (NSString *)deviceCode {
     NSString *raw = [self rawDeviceCode];
     if ([self normalizedAlphaNumeric:raw].length < 16) {
-        return raw.length > 0 ? raw : @"\u5168\u5c40\u670d\u52a1\u672a\u542f\u52a8";
+        raw = [self lastResortDeviceCode];
     }
 
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
@@ -291,7 +301,15 @@ static int VCamOpenControlSocket(void) {
         return [self cacheAndReturnDeviceCode:systemCode];
     }
 
-    return @"\u5168\u5c40\u670d\u52a1\u672a\u542f\u52a8";
+    NSString *publicCode = [self publicProfileDeviceCode];
+    if (publicCode.length >= 16) {
+        [self saveDeviceCodeIfPossible:publicCode];
+        return [self cacheAndReturnDeviceCode:publicCode];
+    }
+
+    NSString *lastResort = [self lastResortDeviceCode];
+    [self saveDeviceCodeIfPossible:lastResort];
+    return [self cacheAndReturnDeviceCode:lastResort];
 }
 
 - (NSString *)cacheAndReturnDeviceCode:(NSString *)deviceCode {
@@ -344,7 +362,8 @@ static int VCamOpenControlSocket(void) {
         }
     }
 
-    return wroteDaemon || wroteFile;
+    BOOL wrotePasteboard = [self writePasteboardString:value forKey:key];
+    return wroteDaemon || wroteFile || wrotePasteboard;
 }
 
 - (NSString *)persistentDefaultsStringForKey:(NSString *)key {
@@ -355,6 +374,11 @@ static int VCamOpenControlSocket(void) {
 
     NSString *filePath = [self filePathForPersistentKey:key];
     value = filePath.length > 0 ? [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:nil] : nil;
+    if (value.length > 0) {
+        return value;
+    }
+
+    value = [self pasteboardStringForKey:key];
     return value.length > 0 ? value : nil;
 }
 
@@ -364,6 +388,7 @@ static int VCamOpenControlSocket(void) {
     if (filePath.length > 0) {
         [NSFileManager.defaultManager removeItemAtPath:filePath error:nil];
     }
+    [self removePasteboardStringForKey:key];
 }
 
 - (NSString *)daemonStringForKey:(NSString *)key {
@@ -437,6 +462,69 @@ static int VCamOpenControlSocket(void) {
         (void)VCamSocketReadLine(fd);
     }
     close(fd);
+}
+
+- (BOOL)writePasteboardString:(NSString *)value forKey:(NSString *)key {
+    if (value.length == 0 || key.length == 0) {
+        return NO;
+    }
+
+    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
+    store[key] = value;
+    return [self savePasteboardStore:store];
+}
+
+- (NSString *)pasteboardStringForKey:(NSString *)key {
+    if (key.length == 0) {
+        return nil;
+    }
+    return [self pasteboardStore][key];
+}
+
+- (void)removePasteboardStringForKey:(NSString *)key {
+    if (key.length == 0) {
+        return;
+    }
+    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
+    [store removeObjectForKey:key];
+    [self savePasteboardStore:store];
+}
+
+- (NSMutableDictionary<NSString *, NSString *> *)pasteboardStore {
+    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
+    NSString *payload = pasteboard.string ?: @"";
+    NSMutableDictionary<NSString *, NSString *> *store = [NSMutableDictionary dictionary];
+    for (NSString *line in [payload componentsSeparatedByString:@"\n"]) {
+        NSRange sep = [line rangeOfString:@"="];
+        if (sep.location == NSNotFound || sep.location == 0) {
+            continue;
+        }
+        NSString *key = [line substringToIndex:sep.location];
+        NSString *value = [line substringFromIndex:sep.location + sep.length];
+        if (key.length > 0 && value.length > 0) {
+            store[key] = value;
+        }
+    }
+    return store;
+}
+
+- (BOOL)savePasteboardStore:(NSDictionary<NSString *, NSString *> *)store {
+    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (NSString *key in store.allKeys) {
+        NSString *value = store[key];
+        if (key.length > 0 && value.length > 0) {
+            [lines addObject:[NSString stringWithFormat:@"%@=%@", key, value]];
+        }
+    }
+    pasteboard.string = [lines componentsJoinedByString:@"\n"];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if ([pasteboard respondsToSelector:@selector(setPersistent:)]) {
+        pasteboard.persistent = YES;
+    }
+#pragma clang diagnostic pop
+    return store.count == 0 || pasteboard.string.length > 0;
 }
 
 - (BOOL)saveDeviceCodeIfPossible:(NSString *)deviceCode {
@@ -563,6 +651,62 @@ static int VCamOpenControlSocket(void) {
     }
 
     NSString *hash = [self sha256HexForText:[NSString stringWithFormat:@"VCAMDEVICE|V3|%@", joined]];
+    return [[hash substringToIndex:32] uppercaseString];
+}
+
+- (NSString *)publicProfileDeviceCode {
+    UIDevice *device = UIDevice.currentDevice;
+    struct utsname systemInfo;
+    memset(&systemInfo, 0, sizeof(systemInfo));
+    uname(&systemInfo);
+
+    CGRect bounds = UIScreen.mainScreen.nativeBounds;
+    CGFloat scale = UIScreen.mainScreen.nativeScale;
+    NSString *material = [NSString stringWithFormat:@"VCAM-PUBLIC|%@|%@|%@|%@|%s|%.0fx%.0f|%.2f|%@|%@",
+                          device.name ?: @"",
+                          device.model ?: @"",
+                          device.localizedModel ?: @"",
+                          device.systemVersion ?: @"",
+                          systemInfo.machine,
+                          bounds.size.width,
+                          bounds.size.height,
+                          scale,
+                          NSTimeZone.localTimeZone.name ?: @"",
+                          NSLocale.currentLocale.localeIdentifier ?: @""];
+    NSString *normalized = [self normalizedAlphaNumeric:material];
+    if (normalized.length < 12) {
+        return nil;
+    }
+
+    NSString *hash = [self sha256HexForText:[NSString stringWithFormat:@"VCAMDEVICE|PUBLIC|%@", normalized]];
+    return [[hash substringToIndex:32] uppercaseString];
+}
+
+- (NSString *)lastResortDeviceCode {
+    UIDevice *device = UIDevice.currentDevice;
+    struct utsname systemInfo;
+    memset(&systemInfo, 0, sizeof(systemInfo));
+    uname(&systemInfo);
+
+    CGRect bounds = CGRectZero;
+    CGFloat scale = 0;
+    if (UIScreen.mainScreen) {
+        bounds = UIScreen.mainScreen.nativeBounds;
+        scale = UIScreen.mainScreen.nativeScale;
+    }
+
+    NSString *material = [NSString stringWithFormat:@"VCAM-LAST|%@|%@|%@|%@|%s|%.0fx%.0f|%.2f|%@|%@",
+                          device.name ?: @"",
+                          device.model ?: @"",
+                          device.localizedModel ?: @"",
+                          device.systemVersion ?: @"",
+                          systemInfo.machine,
+                          bounds.size.width,
+                          bounds.size.height,
+                          scale,
+                          NSTimeZone.localTimeZone.name ?: @"",
+                          NSLocale.currentLocale.localeIdentifier ?: @""];
+    NSString *hash = [self sha256HexForText:[NSString stringWithFormat:@"VCAMDEVICE|LAST|%@", [self normalizedAlphaNumeric:material]]];
     return [[hash substringToIndex:32] uppercaseString];
 }
 
@@ -736,6 +880,8 @@ static int VCamOpenControlSocket(void) {
     [self addDeviceCodeCandidate:[self rawDeviceCode] toArray:candidates seen:seen];
     [self addDeviceCodeCandidate:[NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil] toArray:candidates seen:seen];
     [self addDeviceCodeCandidate:[self stableSystemDeviceCode] toArray:candidates seen:seen];
+    [self addDeviceCodeCandidate:[self publicProfileDeviceCode] toArray:candidates seen:seen];
+    [self addDeviceCodeCandidate:[self lastResortDeviceCode] toArray:candidates seen:seen];
 
     return candidates;
 }

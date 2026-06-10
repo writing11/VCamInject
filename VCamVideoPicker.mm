@@ -293,11 +293,8 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
                                             handler:^(__unused UIAlertAction *action) {
         NSString *code = alert.textFields.firstObject.text ?: @"";
         BOOL ok = [[VCamLicense sharedLicense] activateWithCode:code];
-        NSString *currentDeviceCode = [[VCamLicense sharedLicense] deviceCode];
-        BOOL serviceOffline = [currentDeviceCode rangeOfString:VCamText("\u5168\u5c40\u670d\u52a1")].location != NSNotFound;
         NSString *result = ok ? [NSString stringWithFormat:@"%@\n%@", VCamText("\u6fc0\u6d3b\u6210\u529f"), [[VCamLicense sharedLicense] activationStatusText]]
-                              : (serviceOffline ? VCamText("\u5168\u5c40\u670d\u52a1\u672a\u542f\u52a8\uff0c\u65e0\u6cd5\u4fdd\u5b58\u6fc0\u6d3b\u72b6\u6001\uff0c\u8bf7\u91cd\u88c5\u540e\u91cd\u542f\u624b\u673a")
-                                                : VCamText("\u6fc0\u6d3b\u7801\u65e0\u6548\u6216\u5df2\u8fc7\u671f"));
+                              : VCamText("\u6fc0\u6d3b\u7801\u65e0\u6548\u6216\u5df2\u8fc7\u671f\uff0c\u8bf7\u786e\u8ba4\u4f7f\u7528\u5f53\u524d\u5f39\u7a97\u663e\u793a\u7684\u8bbe\u5907\u7801\u751f\u6210");
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self showMessage:result from:controller];
         });
