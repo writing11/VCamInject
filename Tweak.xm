@@ -53,6 +53,32 @@ static const void *kVCamPreviewDisplayLinkKey = &kVCamPreviewDisplayLinkKey;
 
 static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer);
 
+static BOOL VCamIsSafariFamilyProcess(void) {
+    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
+    NSString *processName = NSProcessInfo.processInfo.processName ?: @"";
+
+    if ([bundleID isEqualToString:@"com.apple.mobilesafari"] ||
+        [bundleID hasPrefix:@"com.apple.WebKit"]) {
+        return YES;
+    }
+
+    if ([processName isEqualToString:@"MobileSafari"] ||
+        [processName rangeOfString:@"WebContent" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [processName rangeOfString:@"WebKit" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return YES;
+    }
+
+    return NO;
+}
+
+static BOOL VCamShouldInitHooks(void) {
+#ifdef VCAM_SAFARI_BUILD
+    return VCamIsSafariFamilyProcess();
+#else
+    return !VCamIsSafariFamilyProcess();
+#endif
+}
+
 static CGImageRef VCamCreateDisplayCGImageFromJPEG(NSData *jpeg) {
     if (jpeg.length == 0) {
         return nil;
@@ -189,6 +215,8 @@ static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer) {
     }
 }
 
+%group VCamHooks
+
 %hook AVCaptureVideoDataOutput
 
 - (void)setSampleBufferDelegate:(id<AVCaptureVideoDataOutputSampleBufferDelegate>)sampleBufferDelegate
@@ -310,6 +338,14 @@ static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer) {
 
 %end
 
+%end
+
 %ctor {
-    NSLog(@"[VCamInject] loaded in %@", NSBundle.mainBundle.bundleIdentifier);
+    if (!VCamShouldInitHooks()) {
+        return;
+    }
+    %init(VCamHooks);
+    NSLog(@"[VCamInject] loaded in %@ (%@)",
+          NSBundle.mainBundle.bundleIdentifier,
+          NSProcessInfo.processInfo.processName);
 }
