@@ -78,7 +78,7 @@ static NSData *VCamSocketReadExactData(int fd, NSUInteger length) {
     }
 
     NSMutableData *data = [NSMutableData dataWithLength:length];
-    uint8_t *p = data.mutableBytes;
+    uint8_t *p = (uint8_t *)data.mutableBytes;
     NSUInteger got = 0;
     while (got < length) {
         ssize_t n = recv(fd, p + got, length - got, 0);
