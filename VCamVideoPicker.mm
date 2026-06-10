@@ -292,9 +292,10 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
         NSString *code = alert.textFields.firstObject.text ?: @"";
-        BOOL ok = [[VCamLicense sharedLicense] activateWithCode:code];
+        NSString *errorMessage = nil;
+        BOOL ok = [[VCamLicense sharedLicense] activateWithCode:code errorMessage:&errorMessage];
         NSString *result = ok ? [NSString stringWithFormat:@"%@\n%@", VCamText("\u6fc0\u6d3b\u6210\u529f"), [[VCamLicense sharedLicense] activationStatusText]]
-                              : VCamText("\u6fc0\u6d3b\u5931\u8d25\uff1a\u6fc0\u6d3b\u7801\u4e0d\u5339\u914d\u3001\u5df2\u8fc7\u671f\uff0c\u6216\u5168\u5c40\u5b58\u50a8\u672a\u751f\u6548");
+                              : (errorMessage.length > 0 ? errorMessage : VCamText("\u6fc0\u6d3b\u5931\u8d25"));
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self showMessage:result from:controller];
         });

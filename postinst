@@ -95,6 +95,38 @@ EOF
     return 0
 }
 
+write_agent_plist() {
+    PLIST_DIR="$1"
+    [ -n "$PLIST_DIR" ] || return 1
+    mkdir -p "$PLIST_DIR" >/dev/null 2>&1 || return 1
+    PLIST="$PLIST_DIR/com.qianmian.vcamreceiver.mobile.plist"
+    cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.qianmian.vcamreceiver.mobile</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$BIN</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/var/mobile/Library/VCam/vcamreceiver.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/mobile/Library/VCam/vcamreceiver.err</string>
+</dict>
+</plist>
+EOF
+    chmod 0644 "$PLIST" >/dev/null 2>&1 || true
+    echo "$PLIST"
+    return 0
+}
+
 PLISTS=""
 if [ -n "$JBROOT" ] && [ -d "$JBROOT" ]; then
     P="$(write_plist "$JBROOT/Library/LaunchDaemons" || true)"
@@ -107,6 +139,18 @@ fi
 P="$(write_plist "/Library/LaunchDaemons" || true)"
 [ -n "$P" ] && PLISTS="$PLISTS $P"
 
+AGENTS=""
+if [ -n "$JBROOT" ] && [ -d "$JBROOT" ]; then
+    P="$(write_agent_plist "$JBROOT/Library/LaunchAgents" || true)"
+    [ -n "$P" ] && AGENTS="$AGENTS $P"
+fi
+if [ -d /var/jb ] || [ -d /var/jb/Library ]; then
+    P="$(write_agent_plist "/var/jb/Library/LaunchAgents" || true)"
+    [ -n "$P" ] && AGENTS="$AGENTS $P"
+fi
+P="$(write_agent_plist "/Library/LaunchAgents" || true)"
+[ -n "$P" ] && AGENTS="$AGENTS $P"
+
 launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
 for PLIST in $PLISTS; do
     launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
@@ -115,6 +159,18 @@ done
 launchctl kickstart -k system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
 
 sleep 1
+if [ -x "$BIN" ]; then
+    if ! pgrep -f "vcamreceiverd" >/dev/null 2>&1; then
+        launchctl bootout gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
+        for PLIST in $AGENTS; do
+            launchctl bootout gui/501 "$PLIST" >/dev/null 2>&1 || true
+            launchctl bootstrap gui/501 "$PLIST" >/dev/null 2>&1 || true
+        done
+        launchctl kickstart -k gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
+        sleep 1
+    fi
+fi
+
 if [ -x "$BIN" ]; then
     if ! pgrep -f "vcamreceiverd" >/dev/null 2>&1; then
         "$BIN" >> "$VCAM_DIR/vcamreceiver.log" 2>> "$VCAM_DIR/vcamreceiver.err" &

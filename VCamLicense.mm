@@ -244,14 +244,38 @@ static int VCamOpenControlSocket(void) {
 }
 
 - (BOOL)activateWithCode:(NSString *)code {
+    return [self activateWithCode:code errorMessage:nil];
+}
+
+- (BOOL)activateWithCode:(NSString *)code errorMessage:(NSString **)errorMessage {
     VCamParsedLicense *license = [self parseActivationCode:code];
-    if (!license || ![self isParsedLicenseValid:license allowExpired:NO]) {
+    if (!license) {
+        if (errorMessage) {
+            *errorMessage = @"\u6fc0\u6d3b\u7801\u683c\u5f0f\u4e0d\u6b63\u786e";
+        }
+        return NO;
+    }
+
+    if ([self isParsedLicenseExpired:license]) {
+        if (errorMessage) {
+            *errorMessage = @"\u6fc0\u6d3b\u7801\u5df2\u8fc7\u671f";
+        }
+        return NO;
+    }
+
+    if (![self isParsedLicenseValid:license allowExpired:NO]) {
+        if (errorMessage) {
+            *errorMessage = @"\u6fc0\u6d3b\u7801\u4e0e\u5f53\u524d\u8bbe\u5907\u7801\u4e0d\u5339\u914d\uff0c\u8bf7\u590d\u5236\u5f53\u524d\u5f39\u7a97\u8bbe\u5907\u7801\u91cd\u65b0\u751f\u6210";
+        }
         return NO;
     }
 
     NSString *canonical = [self canonicalCodeForLicense:license];
     BOOL saved = [self writePersistentString:canonical filePath:kVCamLicensePath defaultsKey:kVCamDefaultsLicenseKey];
     if (!saved) {
+        if (errorMessage) {
+            *errorMessage = @"\u5168\u5c40\u5b58\u50a8\u672a\u751f\u6548\uff1a\u5b88\u62a4\u8fdb\u7a0b\u672a\u542f\u52a8\uff0c\u4e14\u5171\u4eab\u76ee\u5f55\u4e0d\u53ef\u5199";
+        }
         return NO;
     }
 
@@ -259,9 +283,13 @@ static int VCamOpenControlSocket(void) {
         gVCamCachedLicenseCode = [canonical copy];
     }
     VCamParsedLicense *savedLicense = [self parsedLicenseFromStoredCode];
-    return savedLicense &&
-           [self isParsedLicenseValid:savedLicense allowExpired:NO] &&
-           [[self canonicalCodeForLicense:savedLicense] isEqualToString:canonical];
+    BOOL verified = savedLicense &&
+                    [self isParsedLicenseValid:savedLicense allowExpired:NO] &&
+                    [[self canonicalCodeForLicense:savedLicense] isEqualToString:canonical];
+    if (!verified && errorMessage) {
+        *errorMessage = @"\u6fc0\u6d3b\u7801\u5df2\u5199\u5165\uff0c\u4f46\u5168\u5c40\u8bfb\u53d6\u6821\u9a8c\u5931\u8d25";
+    }
+    return verified;
 }
 
 - (void)clearActivation {
@@ -703,7 +731,19 @@ static int VCamOpenControlSocket(void) {
 
     if (cleanParts.count >= 2) {
         NSString *first = cleanParts[0];
-        if ([first isEqualToString:@"PERM"]) {
+        if ([first isEqualToString:@"YP"] && cleanParts.count >= 3 && [cleanParts[1] isEqualToString:@"PERM"]) {
+            prefix = @"YP";
+            expiry = @"PERM";
+            for (NSUInteger i = 2; i < cleanParts.count; i++) {
+                [signature appendString:cleanParts[i]];
+            }
+        } else if ([first isEqualToString:@"Y1"] && cleanParts.count >= 3 && [self isCompactDateString:cleanParts[1]]) {
+            prefix = @"Y1";
+            expiry = cleanParts[1];
+            for (NSUInteger i = 2; i < cleanParts.count; i++) {
+                [signature appendString:cleanParts[i]];
+            }
+        } else if ([first isEqualToString:@"PERM"]) {
             prefix = @"YP";
             expiry = @"PERM";
             for (NSUInteger i = 1; i < cleanParts.count; i++) {
@@ -720,7 +760,18 @@ static int VCamOpenControlSocket(void) {
 
     if (!prefix) {
         NSString *compact = [self normalizedLicenseText:upper];
-        if (compact.length >= 20 && [compact hasPrefix:@"PERM"]) {
+        if (compact.length >= 22 && [compact hasPrefix:@"YPPERM"]) {
+            prefix = @"YP";
+            expiry = @"PERM";
+            [signature appendString:[compact substringFromIndex:6]];
+        } else if (compact.length >= 26 && [compact hasPrefix:@"Y1"]) {
+            NSString *date = [compact substringWithRange:NSMakeRange(2, 8)];
+            if ([self isCompactDateString:date]) {
+                prefix = @"Y1";
+                expiry = date;
+                [signature appendString:[compact substringFromIndex:10]];
+            }
+        } else if (compact.length >= 20 && [compact hasPrefix:@"PERM"]) {
             prefix = @"YP";
             expiry = @"PERM";
             [signature appendString:[compact substringFromIndex:4]];

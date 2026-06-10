@@ -9,6 +9,7 @@
 - (BOOL)canUseVirtualCamera;
 - (BOOL)isTrialActive;
 - (BOOL)activateWithCode:(NSString *)code;
+- (BOOL)activateWithCode:(NSString *)code errorMessage:(NSString **)errorMessage;
 - (void)clearActivation;
 
 @end
