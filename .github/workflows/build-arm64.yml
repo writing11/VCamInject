@@ -1,7 +1,11 @@
-name: Build Rootless Deb
+name: Build Installable ARM64 Deb
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 jobs:
   build:
@@ -18,14 +22,25 @@ jobs:
       - name: Install Theos
         run: |
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          rm -rf "$HOME/theos/sdks"
+          git clone --depth 1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
+          test -d "$HOME/theos"
+          test -d "$HOME/theos/sdks/iPhoneOS16.5.sdk"
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
 
-      - name: Build Rootless package
+      - name: Build ARM64 rootless package
         run: |
           THEOS_PACKAGE_SCHEME=rootless CXXFLAGS="-std=gnu++14" CCFLAGS="-std=gnu++14" make clean package
+
+      - name: Show package architecture
+        run: |
+          for deb in packages/*.deb; do
+            echo "$deb"
+            dpkg-deb -f "$deb" Architecture
+          done
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: VCamInject-rootless-deb
+          name: VCamInstallable-arm64-deb
           path: packages/*.deb
