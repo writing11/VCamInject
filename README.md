@@ -1,6 +1,13 @@
-# VCamInject
+# VCam
 
-RootHide/rootless iOS camera replacement tweak.
+RootHide/rootless installable iOS virtual camera package.
+
+Install the generated `.deb` on the phone. The package installs both parts:
+
+- `vcamreceiverd`: a phone-wide daemon for device code, trial time, activation state, and optional PC frame input.
+- `VCamInject`: the camera hook loaded by MobileSubstrate/ElleKit into apps that use AVFoundation.
+
+You do not need to manually inject files into each app. The hook is still required internally because camera replacement must happen inside the app process that opens the camera.
 
 ## What This Build Does
 
@@ -14,7 +21,7 @@ RootHide/rootless iOS camera replacement tweak.
 - `Choose video and replace` opens the iOS video picker and enables replacement immediately after selection.
 - `Restore real camera` disables replacement and returns the app to the real camera.
 - Uses `PHPickerViewController`, so it avoids the common crash caused by host apps missing `NSPhotoLibraryUsageDescription`.
-- Includes `vcamreceiverd`, a phone-side daemon that listens on TCP port `9999` for the Windows sender handshake.
+- Includes `vcamreceiverd`, a phone-side daemon that installs with the package and listens on local TCP port `9999` for shared state and the Windows sender handshake.
 - Adds offline activation with a 2-hour trial. Camera replacement is blocked after the trial ends unless the device is activated.
 
 ## Phone Controls

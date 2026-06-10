@@ -85,6 +85,27 @@ fi
 
 chmod 0755 "$BIN" "$LAUNCH_BIN" >/dev/null 2>&1 || true
 
+is_vcam_running() {
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "vcamreceiverd" >/dev/null 2>&1 && return 0
+    fi
+    ps ax 2>/dev/null | grep "vcamreceiverd" | grep -v grep >/dev/null 2>&1
+}
+
+write_running_marker() {
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "vcamreceiverd" > "$VCAM_DIR/vcamreceiver.running" 2>/dev/null || true
+    else
+        ps ax 2>/dev/null | grep "vcamreceiverd" | grep -v grep > "$VCAM_DIR/vcamreceiver.running" 2>/dev/null || true
+    fi
+    if is_vcam_running; then
+        echo "running" > "$VCAM_DIR/vcamreceiver.status" 2>/dev/null || true
+    else
+        echo "not-running" > "$VCAM_DIR/vcamreceiver.status" 2>/dev/null || true
+    fi
+    chmod 0666 "$VCAM_DIR"/vcamreceiver.running "$VCAM_DIR"/vcamreceiver.status >/dev/null 2>&1 || true
+}
+
 write_plist() {
     PLIST_DIR="$1"
     [ -n "$PLIST_DIR" ] || return 1
@@ -182,7 +203,7 @@ launchctl kickstart -k system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
 
 sleep 1
 if [ -x "$BIN" ]; then
-    if ! pgrep -f "vcamreceiverd" >/dev/null 2>&1; then
+    if ! is_vcam_running; then
         launchctl bootout gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
         for PLIST in $AGENTS; do
             launchctl bootout gui/501 "$PLIST" >/dev/null 2>&1 || true
@@ -194,7 +215,7 @@ if [ -x "$BIN" ]; then
 fi
 
 if [ -x "$BIN" ]; then
-    if ! pgrep -f "vcamreceiverd" >/dev/null 2>&1; then
+    if ! is_vcam_running; then
         STARTER="$VCAM_DIR/start_vcamreceiver.sh"
         {
             echo "#!/bin/sh"
@@ -207,14 +228,13 @@ if [ -x "$BIN" ]; then
 fi
 
 if [ -x "$BIN" ]; then
-    if ! pgrep -f "vcamreceiverd" >/dev/null 2>&1; then
+    if ! is_vcam_running; then
         "$BIN" >> "$VCAM_DIR/vcamreceiver.log" 2>> "$VCAM_DIR/vcamreceiver.err" &
         echo "$!" > "$VCAM_DIR/vcamreceiver.pid" 2>/dev/null || true
     fi
 fi
 
 chmod 0666 "$VCAM_DIR"/vcamreceiver.* >/dev/null 2>&1 || true
-pgrep -f "vcamreceiverd" > "$VCAM_DIR/vcamreceiver.running" 2>/dev/null || true
-chmod 0666 "$VCAM_DIR"/vcamreceiver.running >/dev/null 2>&1 || true
+write_running_marker
 
 exit 0

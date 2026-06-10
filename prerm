@@ -1,10 +1,20 @@
 #!/bin/sh
 set +e
 
+JBROOT=""
+if command -v jbroot >/dev/null 2>&1; then
+    JBROOT="$(jbroot 2>/dev/null || true)"
+fi
+if [ -z "$JBROOT" ] && [ -d /var/jb ]; then
+    JBROOT="/var/jb"
+fi
+
 launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+[ -n "$JBROOT" ] && launchctl bootout system "$JBROOT/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist" >/dev/null 2>&1 || true
 launchctl bootout system /var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
 launchctl bootout system /Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
 launchctl bootout gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
+[ -n "$JBROOT" ] && launchctl bootout gui/501 "$JBROOT/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist" >/dev/null 2>&1 || true
 launchctl bootout gui/501 /var/jb/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
 launchctl bootout gui/501 /Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
 
@@ -12,8 +22,18 @@ if [ -f /var/mobile/Library/VCam/vcamreceiver.pid ]; then
     kill "$(cat /var/mobile/Library/VCam/vcamreceiver.pid)" >/dev/null 2>&1 || true
     rm -f /var/mobile/Library/VCam/vcamreceiver.pid >/dev/null 2>&1 || true
 fi
-pkill -f vcamreceiverd >/dev/null 2>&1 || true
+if command -v pkill >/dev/null 2>&1; then
+    pkill -f vcamreceiverd >/dev/null 2>&1 || true
+else
+    ps ax 2>/dev/null | grep "vcamreceiverd" | grep -v grep | while read -r PID REST; do
+        kill "$PID" >/dev/null 2>&1 || true
+    done
+fi
+[ -n "$JBROOT" ] && rm -f "$JBROOT/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist" >/dev/null 2>&1 || true
+[ -n "$JBROOT" ] && rm -f "$JBROOT/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist" >/dev/null 2>&1 || true
+rm -f /var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
 rm -f /var/jb/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
+rm -f /Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
 rm -f /Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
 
 exit 0

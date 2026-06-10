@@ -20,11 +20,13 @@ vcamreceiverd_INSTALL_PATH = /usr/local/bin
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
+VCAM_INSTALL_PREFIX := $(THEOS_PACKAGE_INSTALL_PREFIX)
+
 before-package::
 	mkdir -p $(THEOS_STAGING_DIR)/DEBIAN
 	cp postinst $(THEOS_STAGING_DIR)/DEBIAN/postinst
 	cp prerm $(THEOS_STAGING_DIR)/DEBIAN/prerm
 	chmod 0755 $(THEOS_STAGING_DIR)/DEBIAN/postinst $(THEOS_STAGING_DIR)/DEBIAN/prerm
-	mkdir -p $(THEOS_STAGING_DIR)/usr/local/bin
-	cp vcamreceiverd_launch.sh $(THEOS_STAGING_DIR)/usr/local/bin/vcamreceiverd_launch.sh
-	chmod 0755 $(THEOS_STAGING_DIR)/usr/local/bin/vcamreceiverd_launch.sh
+	mkdir -p $(THEOS_STAGING_DIR)$(VCAM_INSTALL_PREFIX)/usr/local/bin
+	cp vcamreceiverd_launch.sh $(THEOS_STAGING_DIR)$(VCAM_INSTALL_PREFIX)/usr/local/bin/vcamreceiverd_launch.sh
+	chmod 0755 $(THEOS_STAGING_DIR)$(VCAM_INSTALL_PREFIX)/usr/local/bin/vcamreceiverd_launch.sh
