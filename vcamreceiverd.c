@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define VCAM_PORT 9999
@@ -35,8 +36,12 @@
 #define CONTROL_MAGIC "VCAMCTL1"
 #define CONTROL_MAGIC_LEN 8
 #define MAX_STATE_BYTES 4096
+#define DEVICE_ID_HEX_BYTES 16
 
 static volatile sig_atomic_t running = 1;
+
+static bool read_state_file(const char *path, char **out, size_t *out_len);
+static bool write_atomic(const char *tmp_path, const char *final_path, const void *data, size_t len);
 
 static void on_signal(int sig) {
     (void)sig;
@@ -47,6 +52,61 @@ static void ensure_dir(void) {
     mkdir("/var/mobile/Library", 0755);
     mkdir(OUT_DIR, 0755);
     chmod(OUT_DIR, 0777);
+}
+
+static bool is_valid_device_id(const char *data, size_t len) {
+    size_t count = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = data[i];
+        bool ok = (c >= '0' && c <= '9') ||
+                  (c >= 'A' && c <= 'Z') ||
+                  (c >= 'a' && c <= 'z');
+        if (!ok) {
+            continue;
+        }
+        count++;
+    }
+    return count >= 16;
+}
+
+static bool ensure_device_id(void) {
+    char *existing = NULL;
+    size_t existing_len = 0;
+    if (read_state_file(DEVICE_FILE, &existing, &existing_len)) {
+        bool valid = is_valid_device_id(existing, existing_len);
+        free(existing);
+        if (valid) {
+            chmod(DEVICE_FILE, 0666);
+            return true;
+        }
+    }
+
+    uint8_t random_bytes[DEVICE_ID_HEX_BYTES];
+    FILE *urandom = fopen("/dev/urandom", "rb");
+    if (urandom) {
+        size_t got = fread(random_bytes, 1, sizeof(random_bytes), urandom);
+        fclose(urandom);
+        if (got != sizeof(random_bytes)) {
+            urandom = NULL;
+        }
+    }
+
+    if (!urandom) {
+        unsigned long seed = (unsigned long)time(NULL) ^ (unsigned long)getpid();
+        for (size_t i = 0; i < sizeof(random_bytes); i++) {
+            seed = seed * 1103515245UL + 12345UL;
+            random_bytes[i] = (uint8_t)((seed >> 16) & 0xff);
+        }
+    }
+
+    char device_id[DEVICE_ID_HEX_BYTES * 2 + 1];
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < sizeof(random_bytes); i++) {
+        device_id[i * 2] = hex[(random_bytes[i] >> 4) & 0x0f];
+        device_id[i * 2 + 1] = hex[random_bytes[i] & 0x0f];
+    }
+    device_id[sizeof(device_id) - 1] = '\0';
+    return write_atomic(DEVICE_TMP_FILE, DEVICE_FILE, device_id, strlen(device_id));
 }
 
 static ssize_t read_exact(int fd, void *buf, size_t len) {
@@ -220,6 +280,7 @@ static bool read_state_file(const char *path, char **out, size_t *out_len) {
 
 static void handle_control_client(int fd) {
     ensure_dir();
+    ensure_device_id();
     if (!ack(fd)) {
         return;
     }
@@ -487,6 +548,7 @@ int main(void) {
     signal(SIGINT, on_signal);
     signal(SIGPIPE, SIG_IGN);
     ensure_dir();
+    ensure_device_id();
 
     int server = listen_socket();
     if (server < 0) {

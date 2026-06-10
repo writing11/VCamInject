@@ -56,7 +56,7 @@ The activation-code signature uses a low-confusion alphabet. This final build on
 
 Old `Y1` / `YP` prefixed codes are intentionally not supported in this build.
 
-The device code is created once during package installation at:
+The device code is created once globally by the install script or `vcamreceiverd` at:
 
 ```text
 /var/mobile/Library/VCam/device.id
@@ -70,7 +70,9 @@ This version stores activation and trial time globally through `vcamreceiverd`. 
 /var/mobile/Library/VCam/device.id
 ```
 
-Injected apps read and write those values only through the daemon and the shared files above, so one activation and one 2-hour trial timer are shared across all injected apps. This build no longer writes activation or trial state into each host app's own defaults. If activation works in one app but not another, reinstall this package so the install script can recreate `device.id`, repair folder permissions, and restart `vcamreceiverd`.
+Injected apps read and write those values only through the daemon and the shared files above, so one activation and one 2-hour trial timer are shared across all injected apps. This build no longer writes activation or trial state into each host app's own defaults.
+
+If different apps show different device codes, the global daemon is not running or the old package is still installed. In this version the app side does not generate random device codes anymore; when the daemon is unavailable, the activation dialog shows `全局服务未启动` instead of a fake per-app code.
 
 ## Priority Order
 

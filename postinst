@@ -32,15 +32,61 @@ chmod 0666 "$LICENSE_KEY" >/dev/null 2>&1 || true
 chmod 0666 "$TRIAL_START" >/dev/null 2>&1 || true
 chmod 0666 "$VCAM_DIR"/source.* >/dev/null 2>&1 || true
 
-PLIST="/var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist"
-if [ ! -f "$PLIST" ]; then
-    PLIST="/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist"
+BIN=""
+for CANDIDATE in \
+    /var/jb/usr/local/bin/vcamreceiverd \
+    /usr/local/bin/vcamreceiverd
+do
+    if [ -x "$CANDIDATE" ]; then
+        BIN="$CANDIDATE"
+        break
+    fi
+done
+
+if [ -z "$BIN" ] && command -v vcamreceiverd >/dev/null 2>&1; then
+    BIN="$(command -v vcamreceiverd)"
 fi
 
-if [ -f "$PLIST" ]; then
-    launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
-    launchctl bootstrap system "$PLIST" >/dev/null 2>&1 || true
-    launchctl kickstart -k system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+if [ -z "$BIN" ]; then
+    BIN="/var/jb/usr/local/bin/vcamreceiverd"
 fi
+
+chmod 0755 "$BIN" >/dev/null 2>&1 || true
+
+PLIST_DIR="/Library/LaunchDaemons"
+if [ -d /var/jb ] || [ -d /var/jb/Library ]; then
+    PLIST_DIR="/var/jb/Library/LaunchDaemons"
+fi
+mkdir -p "$PLIST_DIR"
+PLIST="$PLIST_DIR/com.qianmian.vcamreceiver.plist"
+
+cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.qianmian.vcamreceiver</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$BIN</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/mobile/Library/VCam/vcamreceiver.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/mobile/Library/VCam/vcamreceiver.err</string>
+</dict>
+</plist>
+EOF
+
+chmod 0644 "$PLIST" >/dev/null 2>&1 || true
+launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
+launchctl bootstrap system "$PLIST" >/dev/null 2>&1 || true
+launchctl kickstart -k system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
 
 exit 0
