@@ -21,8 +21,6 @@ static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.s
 static NSString * const kVCamDefaultsDeviceKey = @"device.id";
 static NSString * const kVCamDefaultsLicenseKey = @"license.key";
 static NSString * const kVCamDefaultsTrialStartKey = @"trial.start";
-static NSString * const kVCamSharedPasteboardName = @"com.qianmian.vcam.global.state";
-static NSString * const kVCamSharedPasteboardMagic = @"VCAMGLOBAL2";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static const int kVCamDaemonPort = 9999;
@@ -276,7 +274,7 @@ static int VCamOpenControlSocket(void) {
     BOOL saved = [self writePersistentString:canonical filePath:kVCamLicensePath defaultsKey:kVCamDefaultsLicenseKey];
     if (!saved) {
         if (errorMessage) {
-            *errorMessage = @"\u5168\u5c40\u5b58\u50a8\u672a\u751f\u6548\uff1a\u5b88\u62a4\u8fdb\u7a0b\u3001\u5171\u4eab\u76ee\u5f55\u548c\u5171\u4eab\u901a\u9053\u90fd\u4e0d\u53ef\u5199";
+            *errorMessage = @"\u5168\u5c40\u5b58\u50a8\u672a\u751f\u6548\uff1a\u5b88\u62a4\u8fdb\u7a0b\u672a\u8fde\u63a5\uff0c\u4e14\u5171\u4eab\u76ee\u5f55\u4e0d\u53ef\u5199";
         }
         return NO;
     }
@@ -372,126 +370,12 @@ static int VCamOpenControlSocket(void) {
     return nil;
 }
 
-- (UIPasteboard *)sharedStatePasteboard {
-    @try {
-        UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamSharedPasteboardName create:YES];
-        if ([pasteboard respondsToSelector:@selector(setPersistent:)]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            pasteboard.persistent = YES;
-#pragma clang diagnostic pop
-        }
-        return pasteboard;
-    } @catch (__unused NSException *exception) {
-        return nil;
-    }
-}
-
-- (NSMutableDictionary<NSString *, NSString *> *)stateDictionaryFromText:(NSString *)text {
-    NSMutableDictionary<NSString *, NSString *> *state = [NSMutableDictionary dictionary];
-    if (![text hasPrefix:kVCamSharedPasteboardMagic]) {
-        return state;
-    }
-
-    NSArray<NSString *> *lines = [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
-    for (NSString *line in lines) {
-        NSRange range = [line rangeOfString:@"="];
-        if (range.location == NSNotFound || range.location == 0) {
-            continue;
-        }
-        NSString *key = [line substringToIndex:range.location];
-        NSString *value = [line substringFromIndex:range.location + 1];
-        if (key.length > 0 && value.length > 0) {
-            state[key] = value;
-        }
-    }
-    return state;
-}
-
-- (NSString *)textFromStateDictionary:(NSDictionary<NSString *, NSString *> *)state {
-    NSMutableString *text = [NSMutableString stringWithFormat:@"%@\n", kVCamSharedPasteboardMagic];
-    NSArray<NSString *> *keys = [state.allKeys sortedArrayUsingSelector:@selector(compare:)];
-    for (NSString *key in keys) {
-        NSString *value = [state[key] stringByReplacingOccurrencesOfString:@"\n" withString:@""];
-        if (key.length > 0 &&
-            [key rangeOfString:@"="].location == NSNotFound &&
-            [key rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location == NSNotFound &&
-            value.length > 0) {
-            [text appendFormat:@"%@=%@\n", key, value];
-        }
-    }
-    return text;
-}
-
-- (NSString *)sharedPasteboardStringForKey:(NSString *)key {
-    if (key.length == 0) {
-        return nil;
-    }
-
-    UIPasteboard *namedPasteboard = [self sharedStatePasteboard];
-    NSString *named = [self stateDictionaryFromText:namedPasteboard.string][key];
-    if (named.length > 0) {
-        return named;
-    }
-
-    if (![key isEqualToString:kVCamDefaultsLicenseKey]) {
-        return nil;
-    }
-
-    NSString *general = [self stateDictionaryFromText:UIPasteboard.generalPasteboard.string][key];
-    return general.length > 0 ? general : nil;
-}
-
-- (BOOL)writeSharedPasteboardString:(NSString *)value forKey:(NSString *)key {
-    if (value.length == 0 || key.length == 0) {
-        return NO;
-    }
-
-    BOOL wrote = NO;
-    UIPasteboard *namedPasteboard = [self sharedStatePasteboard];
-    if (namedPasteboard) {
-        NSMutableDictionary<NSString *, NSString *> *state = [self stateDictionaryFromText:namedPasteboard.string];
-        state[key] = value;
-        namedPasteboard.string = [self textFromStateDictionary:state];
-        wrote = [[self stateDictionaryFromText:namedPasteboard.string][key] isEqualToString:value];
-    }
-
-    if ([key isEqualToString:kVCamDefaultsLicenseKey]) {
-        NSMutableDictionary<NSString *, NSString *> *state = [self stateDictionaryFromText:UIPasteboard.generalPasteboard.string];
-        state[key] = value;
-        UIPasteboard.generalPasteboard.string = [self textFromStateDictionary:state];
-        wrote = wrote || [[self stateDictionaryFromText:UIPasteboard.generalPasteboard.string][key] isEqualToString:value];
-    }
-
-    return wrote;
-}
-
-- (void)removeSharedPasteboardValueForKey:(NSString *)key {
-    if (key.length == 0) {
-        return;
-    }
-
-    UIPasteboard *namedPasteboard = [self sharedStatePasteboard];
-    if (namedPasteboard) {
-        NSMutableDictionary<NSString *, NSString *> *state = [self stateDictionaryFromText:namedPasteboard.string];
-        [state removeObjectForKey:key];
-        namedPasteboard.string = [self textFromStateDictionary:state];
-    }
-
-    NSMutableDictionary<NSString *, NSString *> *generalState = [self stateDictionaryFromText:UIPasteboard.generalPasteboard.string];
-    if (generalState[key]) {
-        [generalState removeObjectForKey:key];
-        UIPasteboard.generalPasteboard.string = [self textFromStateDictionary:generalState];
-    }
-}
-
 - (BOOL)writePersistentString:(NSString *)value filePath:(NSString *)filePath defaultsKey:(NSString *)key {
     if (value.length == 0 || key.length == 0) {
         return NO;
     }
 
     BOOL wroteDaemon = [self writeDaemonString:value forKey:key];
-    BOOL wrotePasteboard = [self writeSharedPasteboardString:value forKey:key];
     BOOL wroteFile = NO;
     if (filePath.length > 0) {
         [self ensureLicenseDirectory];
@@ -505,7 +389,7 @@ static int VCamOpenControlSocket(void) {
         }
     }
 
-    return wroteDaemon || wroteFile || wrotePasteboard;
+    return wroteDaemon || wroteFile;
 }
 
 - (NSString *)persistentDefaultsStringForKey:(NSString *)key {
@@ -520,17 +404,11 @@ static int VCamOpenControlSocket(void) {
         return value;
     }
 
-    value = [self sharedPasteboardStringForKey:key];
-    if (value.length > 0) {
-        return value;
-    }
-
     return nil;
 }
 
 - (void)removePersistentDefaultsValueForKey:(NSString *)key {
     [self removeDaemonStringForKey:key];
-    [self removeSharedPasteboardValueForKey:key];
     NSString *filePath = [self filePathForPersistentKey:key];
     if (filePath.length > 0) {
         [NSFileManager.defaultManager removeItemAtPath:filePath error:nil];

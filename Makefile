@@ -25,3 +25,6 @@ before-package::
 	cp postinst $(THEOS_STAGING_DIR)/DEBIAN/postinst
 	cp prerm $(THEOS_STAGING_DIR)/DEBIAN/prerm
 	chmod 0755 $(THEOS_STAGING_DIR)/DEBIAN/postinst $(THEOS_STAGING_DIR)/DEBIAN/prerm
+	mkdir -p $(THEOS_STAGING_DIR)/usr/local/bin
+	cp vcamreceiverd_launch.sh $(THEOS_STAGING_DIR)/usr/local/bin/vcamreceiverd_launch.sh
+	chmod 0755 $(THEOS_STAGING_DIR)/usr/local/bin/vcamreceiverd_launch.sh

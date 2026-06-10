@@ -6,7 +6,7 @@
     <string>com.qianmian.vcamreceiver</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/var/jb/usr/local/bin/vcamreceiverd</string>
+        <string>/var/jb/usr/local/bin/vcamreceiverd_launch.sh</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

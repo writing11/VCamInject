@@ -54,7 +54,7 @@ The activation-code signature uses a low-confusion alphabet. This final build on
 - 1-month: `YYYYMMDD-XXXX-XXXX-XXXX-XXXX`
 - Permanent: `PERM-XXXX-XXXX-XXXX-XXXX`
 
-The phone accepts both the current short codes and older `Y1` / `YP` prefixed codes.
+Use the current `VCamKeygen.py` or `VCamKeygen.exe` with this build so the generated code format matches the phone side.
 
 The device code is created once globally by the install script or `vcamreceiverd` at:
 

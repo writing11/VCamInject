@@ -61,7 +61,29 @@ if [ -z "$BIN" ]; then
     BIN="/var/jb/usr/local/bin/vcamreceiverd"
 fi
 
-chmod 0755 "$BIN" >/dev/null 2>&1 || true
+LAUNCH_BIN=""
+for CANDIDATE in \
+    "$JBROOT/usr/local/bin/vcamreceiverd_launch.sh" \
+    /var/jb/usr/local/bin/vcamreceiverd_launch.sh \
+    /usr/local/bin/vcamreceiverd_launch.sh \
+    /private/preboot/*/jb-*/usr/local/bin/vcamreceiverd_launch.sh \
+    /var/containers/Bundle/Application/.jbroot-*/usr/local/bin/vcamreceiverd_launch.sh
+do
+    if [ -n "$CANDIDATE" ] && [ -x "$CANDIDATE" ]; then
+        LAUNCH_BIN="$CANDIDATE"
+        break
+    fi
+done
+
+if [ -z "$LAUNCH_BIN" ]; then
+    LAUNCH_BIN="$(find /var/jb /private/preboot /var/containers -path '*usr/local/bin/vcamreceiverd_launch.sh' -type f 2>/dev/null | head -n 1 || true)"
+fi
+
+if [ -z "$LAUNCH_BIN" ]; then
+    LAUNCH_BIN="$BIN"
+fi
+
+chmod 0755 "$BIN" "$LAUNCH_BIN" >/dev/null 2>&1 || true
 
 write_plist() {
     PLIST_DIR="$1"
@@ -77,7 +99,7 @@ write_plist() {
     <string>com.qianmian.vcamreceiver</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$BIN</string>
+        <string>$LAUNCH_BIN</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -109,7 +131,7 @@ write_agent_plist() {
     <string>com.qianmian.vcamreceiver.mobile</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$BIN</string>
+        <string>$LAUNCH_BIN</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
