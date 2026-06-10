@@ -5,4 +5,10 @@ launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
 launchctl bootout system /var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
 launchctl bootout system /Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
 
+if [ -f /var/mobile/Library/VCam/vcamreceiver.pid ]; then
+    kill "$(cat /var/mobile/Library/VCam/vcamreceiver.pid)" >/dev/null 2>&1 || true
+    rm -f /var/mobile/Library/VCam/vcamreceiver.pid >/dev/null 2>&1 || true
+fi
+pkill -f vcamreceiverd >/dev/null 2>&1 || true
+
 exit 0
