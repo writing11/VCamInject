@@ -62,13 +62,15 @@ The device code is created once during package installation at:
 /var/mobile/Library/VCam/device.id
 ```
 
-This version stores activation globally in:
+This version stores activation and trial time globally through `vcamreceiverd`. The daemon owns the shared files:
 
 ```text
 /var/mobile/Library/VCam/license.key
+/var/mobile/Library/VCam/trial.start
+/var/mobile/Library/VCam/device.id
 ```
 
-It also keeps a shared named-pasteboard backup and an app-local fallback, so activation and trial time are not reset when a sandboxed target app cannot write the global file. If every phone shows the same device code, or the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions.
+Injected apps read and write those values through the daemon first, so one activation and one 2-hour trial timer are shared across all injected apps. A named-pasteboard backup and an app-local fallback are still kept only as emergency fallback when the daemon is not running. If every phone shows the same device code, or the device code changes every time the app opens, reinstall this package so the install script can recreate `device.id` and repair the folder permissions.
 
 ## Priority Order
 
@@ -80,7 +82,7 @@ The tweak uses sources in this order:
 
 ## Windows Sender
 
-`vcamreceiverd` listens on port `9999` and acknowledges the Windows handshake.
+`vcamreceiverd` listens on port `9999`, acknowledges the Windows handshake, and also serves local activation/trial/device state to injected apps.
 
 This build supports two receiver modes:
 

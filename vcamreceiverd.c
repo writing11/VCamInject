@@ -26,6 +26,15 @@
 #define INFO_FILE OUT_DIR "/frame.info"
 #define INFO_TMP_FILE OUT_DIR "/frame.info.tmp"
 #define DISABLED_FILE OUT_DIR "/disabled"
+#define DEVICE_FILE OUT_DIR "/device.id"
+#define DEVICE_TMP_FILE OUT_DIR "/device.id.tmp"
+#define LICENSE_FILE OUT_DIR "/license.key"
+#define LICENSE_TMP_FILE OUT_DIR "/license.key.tmp"
+#define TRIAL_FILE OUT_DIR "/trial.start"
+#define TRIAL_TMP_FILE OUT_DIR "/trial.start.tmp"
+#define CONTROL_MAGIC "VCAMCTL1"
+#define CONTROL_MAGIC_LEN 8
+#define MAX_STATE_BYTES 4096
 
 static volatile sig_atomic_t running = 1;
 
@@ -37,6 +46,7 @@ static void on_signal(int sig) {
 static void ensure_dir(void) {
     mkdir("/var/mobile/Library", 0755);
     mkdir(OUT_DIR, 0755);
+    chmod(OUT_DIR, 0777);
 }
 
 static ssize_t read_exact(int fd, void *buf, size_t len) {
@@ -63,6 +73,52 @@ static ssize_t read_exact(int fd, void *buf, size_t len) {
 static bool ack(int fd) {
     uint8_t ok = 0x01;
     return send(fd, &ok, 1, 0) == 1;
+}
+
+static bool send_all(int fd, const void *buf, size_t len) {
+    const uint8_t *p = (const uint8_t *)buf;
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, p + sent, len - sent, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (n == 0) {
+            return false;
+        }
+        sent += (size_t)n;
+    }
+    return true;
+}
+
+static ssize_t read_line(int fd, char *buf, size_t cap) {
+    if (cap == 0) {
+        return -1;
+    }
+
+    size_t len = 0;
+    while (len + 1 < cap) {
+        char c = 0;
+        ssize_t n = recv(fd, &c, 1, 0);
+        if (n == 0) {
+            break;
+        }
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (c == '\n') {
+            break;
+        }
+        buf[len++] = c;
+    }
+    buf[len] = '\0';
+    return (ssize_t)len;
 }
 
 static uint32_t read_u32_be(const uint8_t *p) {
@@ -93,7 +149,133 @@ static bool write_atomic(const char *tmp_path, const char *final_path, const voi
         unlink(tmp_path);
         return false;
     }
+    chmod(final_path, 0666);
     return true;
+}
+
+static const char *state_path_for_key(const char *key) {
+    if (strcmp(key, "device.id") == 0) {
+        return DEVICE_FILE;
+    }
+    if (strcmp(key, "license.key") == 0) {
+        return LICENSE_FILE;
+    }
+    if (strcmp(key, "trial.start") == 0) {
+        return TRIAL_FILE;
+    }
+    return NULL;
+}
+
+static const char *state_tmp_path_for_key(const char *key) {
+    if (strcmp(key, "device.id") == 0) {
+        return DEVICE_TMP_FILE;
+    }
+    if (strcmp(key, "license.key") == 0) {
+        return LICENSE_TMP_FILE;
+    }
+    if (strcmp(key, "trial.start") == 0) {
+        return TRIAL_TMP_FILE;
+    }
+    return NULL;
+}
+
+static bool read_state_file(const char *path, char **out, size_t *out_len) {
+    FILE *in = fopen(path, "rb");
+    if (!in) {
+        return false;
+    }
+
+    if (fseek(in, 0, SEEK_END) != 0) {
+        fclose(in);
+        return false;
+    }
+    long size = ftell(in);
+    if (size < 0 || size > (long)MAX_STATE_BYTES) {
+        fclose(in);
+        return false;
+    }
+    rewind(in);
+
+    char *data = calloc((size_t)size + 1, 1);
+    if (!data) {
+        fclose(in);
+        return false;
+    }
+
+    size_t got = fread(data, 1, (size_t)size, in);
+    fclose(in);
+    if (got != (size_t)size) {
+        free(data);
+        return false;
+    }
+
+    while (got > 0 && (data[got - 1] == '\n' || data[got - 1] == '\r' || data[got - 1] == ' ' || data[got - 1] == '\t')) {
+        data[--got] = '\0';
+    }
+
+    *out = data;
+    *out_len = got;
+    return true;
+}
+
+static void handle_control_client(int fd) {
+    ensure_dir();
+    if (!ack(fd)) {
+        return;
+    }
+
+    char line[256];
+    if (read_line(fd, line, sizeof(line)) <= 0) {
+        return;
+    }
+
+    char command[16] = {0};
+    char key[64] = {0};
+    unsigned int len = 0;
+    int parsed = sscanf(line, "%15s %63s %u", command, key, &len);
+    const char *path = state_path_for_key(key);
+    const char *tmp_path = state_tmp_path_for_key(key);
+
+    if (parsed >= 2 && strcmp(command, "GET") == 0 && path) {
+        char *data = NULL;
+        size_t data_len = 0;
+        if (!read_state_file(path, &data, &data_len)) {
+            send_all(fd, "NO 0\n", 5);
+            return;
+        }
+
+        char header[64];
+        int n = snprintf(header, sizeof(header), "OK %zu\n", data_len);
+        if (n > 0 && n < (int)sizeof(header)) {
+            send_all(fd, header, (size_t)n);
+            if (data_len > 0) {
+                send_all(fd, data, data_len);
+            }
+        }
+        free(data);
+        return;
+    }
+
+    if (parsed == 3 && strcmp(command, "SET") == 0 && path && tmp_path && len <= MAX_STATE_BYTES) {
+        char *data = calloc((size_t)len + 1, 1);
+        if (!data) {
+            send_all(fd, "ERR 0\n", 6);
+            return;
+        }
+        ssize_t got = read_exact(fd, data, (size_t)len);
+        bool ok = got == (ssize_t)len && write_atomic(tmp_path, path, data, (size_t)len);
+        free(data);
+        send_all(fd, ok ? "OK 0\n" : "ERR 0\n", ok ? 5 : 6);
+        return;
+    }
+
+    if (parsed >= 2 && strcmp(command, "DEL") == 0 && path) {
+        unlink(path);
+        send_all(fd, "OK 0\n", 5);
+        return;
+    }
+
+    send_all(fd, "ERR 0\n", 6);
 }
 
 static bool write_frame_info(uint32_t width, uint32_t height, uint32_t fps) {
@@ -245,6 +427,11 @@ static void handle_client(int fd) {
 
     if (memcmp(handshake, "VCAM", 4) != 0) {
         fprintf(stderr, "warning: unknown handshake magic\n");
+    }
+
+    if (memcmp(handshake, CONTROL_MAGIC, CONTROL_MAGIC_LEN) == 0) {
+        handle_control_client(fd);
+        return;
     }
 
     if (!ack(fd)) {

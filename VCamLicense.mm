@@ -3,9 +3,15 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <CommonCrypto/CommonHMAC.h>
 #import <UIKit/UIKit.h>
+#import <arpa/inet.h>
 #import <dlfcn.h>
+#import <errno.h>
 #import <math.h>
+#import <netinet/in.h>
+#import <sys/socket.h>
 #import <sys/stat.h>
+#import <string.h>
+#import <unistd.h>
 
 static NSString * const kVCamLicenseDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
@@ -18,9 +24,117 @@ static NSString * const kVCamDefaultsTrialStartKey = @"trial.start";
 static NSString * const kVCamPasteboardName = @"com.qianmian.vcam.store";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
+static const int kVCamDaemonPort = 9999;
 static NSString *gVCamCachedDeviceCode = nil;
 static NSString *gVCamCachedLicenseCode = nil;
 static NSTimeInterval gVCamCachedTrialStart = 0;
+
+static BOOL VCamSocketSendAll(int fd, const void *bytes, size_t length) {
+    const uint8_t *p = (const uint8_t *)bytes;
+    size_t sent = 0;
+    while (sent < length) {
+        ssize_t n = send(fd, p + sent, length - sent, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return NO;
+        }
+        if (n == 0) {
+            return NO;
+        }
+        sent += (size_t)n;
+    }
+    return YES;
+}
+
+static NSString *VCamSocketReadLine(int fd) {
+    char buf[256];
+    size_t len = 0;
+    while (len + 1 < sizeof(buf)) {
+        char c = 0;
+        ssize_t n = recv(fd, &c, 1, 0);
+        if (n == 0) {
+            break;
+        }
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return nil;
+        }
+        if (c == '\n') {
+            break;
+        }
+        buf[len++] = c;
+    }
+    buf[len] = '\0';
+    return [[NSString alloc] initWithBytes:buf length:len encoding:NSUTF8StringEncoding];
+}
+
+static NSData *VCamSocketReadExactData(int fd, NSUInteger length) {
+    if (length == 0) {
+        return [NSData data];
+    }
+
+    NSMutableData *data = [NSMutableData dataWithLength:length];
+    uint8_t *p = data.mutableBytes;
+    NSUInteger got = 0;
+    while (got < length) {
+        ssize_t n = recv(fd, p + got, length - got, 0);
+        if (n == 0) {
+            return nil;
+        }
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return nil;
+        }
+        got += (NSUInteger)n;
+    }
+    return data;
+}
+
+static int VCamOpenControlSocket(void) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 250000;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(kVCamDaemonPort);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return -1;
+    }
+
+    uint8_t handshake[44] = {0};
+    memcpy(handshake, "VCAMCTL1", 8);
+    if (!VCamSocketSendAll(fd, handshake, sizeof(handshake))) {
+        close(fd);
+        return -1;
+    }
+
+    uint8_t ack = 0;
+    ssize_t n = recv(fd, &ack, 1, 0);
+    if (n != 1 || ack != 0x01) {
+        close(fd);
+        return -1;
+    }
+
+    return fd;
+}
 
 @interface VCamParsedLicense : NSObject
 @property (nonatomic, copy) NSString *prefix;
@@ -147,24 +261,25 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
 }
 
 - (NSString *)rawDeviceCode {
-    NSString *cached = [self normalizedAlphaNumeric:gVCamCachedDeviceCode];
-    if (cached.length >= 16) {
-        return cached;
-    }
-
     [self ensureLicenseDirectory];
 
-    NSString *stored = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
-    NSString *normalized = [self normalizedAlphaNumeric:stored];
-    if (normalized.length >= 16) {
-        return [self cacheAndReturnDeviceCode:normalized];
-    }
-
     NSString *fallback = [self persistentDefaultsStringForKey:kVCamDefaultsDeviceKey];
-    normalized = [self normalizedAlphaNumeric:fallback];
+    NSString *normalized = [self normalizedAlphaNumeric:fallback];
     if (normalized.length >= 16) {
         [self saveDeviceCodeIfPossible:normalized];
         return [self cacheAndReturnDeviceCode:normalized];
+    }
+
+    NSString *stored = [NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil];
+    normalized = [self normalizedAlphaNumeric:stored];
+    if (normalized.length >= 16) {
+        return [self cacheAndReturnDeviceCode:normalized];
+    }
+
+    NSString *cached = [self normalizedAlphaNumeric:gVCamCachedDeviceCode];
+    if (cached.length >= 16) {
+        [self saveDeviceCodeIfPossible:cached];
+        return cached;
     }
 
     NSString *systemCode = [self stableSystemDeviceCode];
@@ -217,6 +332,7 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
         }
     }
 
+    BOOL wroteDaemon = [self writeDaemonString:value forKey:key];
     BOOL wrotePasteboard = [self writePasteboardString:value forKey:key];
 
     NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
@@ -226,11 +342,16 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
     [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
     BOOL wroteStandard = [NSUserDefaults.standardUserDefaults synchronize];
 
-    return wroteFile || wrotePasteboard || wroteSuite || wroteStandard;
+    return wroteFile || wroteDaemon || wrotePasteboard || wroteSuite || wroteStandard;
 }
 
 - (NSString *)persistentDefaultsStringForKey:(NSString *)key {
-    NSString *value = [self pasteboardStringForKey:key];
+    NSString *value = [self daemonStringForKey:key];
+    if (value.length > 0) {
+        return value;
+    }
+
+    value = [self pasteboardStringForKey:key];
     if (value.length > 0) {
         return value;
     }
@@ -246,12 +367,86 @@ static NSTimeInterval gVCamCachedTrialStart = 0;
 }
 
 - (void)removePersistentDefaultsValueForKey:(NSString *)key {
+    [self removeDaemonStringForKey:key];
     [self removePasteboardStringForKey:key];
     NSUserDefaults *suite = [[NSUserDefaults alloc] initWithSuiteName:kVCamDefaultsSuiteName];
     [suite removeObjectForKey:key];
     [suite synchronize];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
     [NSUserDefaults.standardUserDefaults synchronize];
+}
+
+- (NSString *)daemonStringForKey:(NSString *)key {
+    if (key.length == 0) {
+        return nil;
+    }
+
+    int fd = VCamOpenControlSocket();
+    if (fd < 0) {
+        return nil;
+    }
+
+    NSString *command = [NSString stringWithFormat:@"GET %@\n", key];
+    NSData *commandData = [command dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *result = nil;
+    if (VCamSocketSendAll(fd, commandData.bytes, commandData.length)) {
+        NSString *header = VCamSocketReadLine(fd);
+        NSArray<NSString *> *parts = [header componentsSeparatedByString:@" "];
+        if (parts.count >= 2 && [parts[0] isEqualToString:@"OK"]) {
+            NSUInteger length = (NSUInteger)MAX((NSInteger)0, parts[1].integerValue);
+            NSData *payload = VCamSocketReadExactData(fd, length);
+            if (payload) {
+                result = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding];
+            }
+        }
+    }
+    close(fd);
+    return result.length > 0 ? result : nil;
+}
+
+- (BOOL)writeDaemonString:(NSString *)value forKey:(NSString *)key {
+    if (value.length == 0 || key.length == 0) {
+        return NO;
+    }
+
+    NSData *payload = [value dataUsingEncoding:NSUTF8StringEncoding];
+    if (payload.length == 0 || payload.length > 4096) {
+        return NO;
+    }
+
+    int fd = VCamOpenControlSocket();
+    if (fd < 0) {
+        return NO;
+    }
+
+    NSString *command = [NSString stringWithFormat:@"SET %@ %lu\n", key, (unsigned long)payload.length];
+    NSData *commandData = [command dataUsingEncoding:NSUTF8StringEncoding];
+    BOOL ok = VCamSocketSendAll(fd, commandData.bytes, commandData.length) &&
+              VCamSocketSendAll(fd, payload.bytes, payload.length);
+    if (ok) {
+        NSString *header = VCamSocketReadLine(fd);
+        ok = [header hasPrefix:@"OK "];
+    }
+    close(fd);
+    return ok;
+}
+
+- (void)removeDaemonStringForKey:(NSString *)key {
+    if (key.length == 0) {
+        return;
+    }
+
+    int fd = VCamOpenControlSocket();
+    if (fd < 0) {
+        return;
+    }
+
+    NSString *command = [NSString stringWithFormat:@"DEL %@\n", key];
+    NSData *commandData = [command dataUsingEncoding:NSUTF8StringEncoding];
+    if (VCamSocketSendAll(fd, commandData.bytes, commandData.length)) {
+        (void)VCamSocketReadLine(fd);
+    }
+    close(fd);
 }
 
 - (BOOL)writePasteboardString:(NSString *)value forKey:(NSString *)key {

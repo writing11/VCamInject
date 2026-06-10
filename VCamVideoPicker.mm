@@ -9,7 +9,7 @@
 
 static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
 
-@interface VCamVideoPicker () <PHPickerViewControllerDelegate>
+@interface VCamVideoPicker () <PHPickerViewControllerDelegate, UIAdaptivePresentationControllerDelegate>
 @property (nonatomic, weak) UIViewController *presentingController;
 @property (nonatomic, weak) UIWindow *controlWindow;
 @property (nonatomic, strong) UIButton *controlButton;
@@ -198,7 +198,11 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
 
 - (void)presentPhotoPickerFromWindow:(UIWindow *)window {
     if (self.presenting) {
-        return;
+        if (!self.presentingController.presentedViewController) {
+            [self resetPickerPresentationState];
+        } else {
+            return;
+        }
     }
 
     UIViewController *top = [self topControllerForWindow:window];
@@ -218,6 +222,7 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
 
         PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
         picker.delegate = self;
+        picker.presentationController.delegate = self;
 
         self.presenting = YES;
         self.presentingController = top;
@@ -225,6 +230,11 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
     } else {
         [self showMessage:VCamText("\u9700\u8981 iOS 14 \u6216\u66f4\u65b0\u7248\u672c") from:top];
     }
+}
+
+- (void)resetPickerPresentationState {
+    self.presenting = NO;
+    self.presentingController = nil;
 }
 
 - (void)showActivationMenuFromController:(UIViewController *)controller {
@@ -341,13 +351,12 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
 }
 
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results API_AVAILABLE(ios(14.0)) {
-    [picker dismissViewControllerAnimated:YES completion:^{
-        self.presenting = NO;
-    }];
+    self.presenting = NO;
+    [picker dismissViewControllerAnimated:YES completion:nil];
 
     PHPickerResult *result = results.firstObject;
     if (!result) {
-        self.presentingController = nil;
+        [self resetPickerPresentationState];
         return;
     }
 
@@ -355,7 +364,7 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
     NSString *typeIdentifier = [self firstSupportedVideoTypeFromProvider:provider];
     if (!typeIdentifier) {
         [self showMessage:VCamText("\u6ca1\u6709\u9009\u62e9\u89c6\u9891") from:self.presentingController];
-        self.presentingController = nil;
+        [self resetPickerPresentationState];
         return;
     }
 
@@ -363,7 +372,7 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
         if (!url || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self showMessage:VCamText("\u8bfb\u53d6\u89c6\u9891\u5931\u8d25") from:self.presentingController];
-                self.presentingController = nil;
+                [self resetPickerPresentationState];
             });
             return;
         }
@@ -375,9 +384,14 @@ static NSString * const kVCamSharedDir = @"/var/mobile/Library/VCam";
             } else {
                 [self showMessage:VCamText("\u590d\u5236\u89c6\u9891\u5931\u8d25") from:self.presentingController];
             }
-            self.presentingController = nil;
+            [self resetPickerPresentationState];
         });
     }];
+}
+
+- (void)presentationControllerDidDismiss:(UIPresentationController *)presentationController {
+    (void)presentationController;
+    [self resetPickerPresentationState];
 }
 
 - (NSString *)firstSupportedVideoTypeFromProvider:(NSItemProvider *)provider {
