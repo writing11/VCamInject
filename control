@@ -1,6 +1,6 @@
 Package: com.dingzhi.vcaminject
 Name: VCam
-Version: 0.3.2
+Version: 0.3.6
 Architecture: iphoneos-arm64
 Description: Installable virtual camera package with global daemon state.
 Maintainer: dingzhi
