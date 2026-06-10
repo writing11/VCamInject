@@ -8,11 +8,14 @@
 #import <errno.h>
 #import <math.h>
 #import <netinet/in.h>
+#import <spawn.h>
 #import <sys/socket.h>
 #import <sys/stat.h>
 #import <sys/utsname.h>
 #import <string.h>
 #import <unistd.h>
+
+extern char **environ;
 
 static NSString * const kVCamLicenseDir = @"/var/mobile/Library/VCam";
 static NSString * const kVCamDevicePath = @"/var/mobile/Library/VCam/device.id";
@@ -27,6 +30,74 @@ static const int kVCamDaemonPort = 9999;
 static NSString *gVCamCachedDeviceCode = nil;
 static NSString *gVCamCachedLicenseCode = nil;
 static NSTimeInterval gVCamCachedTrialStart = 0;
+
+static NSArray<NSString *> *VCamReceiverCandidatePaths(void) {
+    static NSArray<NSString *> *cachedPaths = nil;
+    if (cachedPaths) {
+        return cachedPaths;
+    }
+
+    NSMutableArray<NSString *> *paths = [NSMutableArray arrayWithArray:@[
+        @"/var/jb/usr/local/bin/vcamreceiverd",
+        @"/usr/local/bin/vcamreceiverd"
+    ]];
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSArray<NSString *> *jbrootParents = @[
+        @"/var/containers/Bundle/Application",
+        @"/private/preboot"
+    ];
+    for (NSString *parent in jbrootParents) {
+        NSDirectoryEnumerator<NSString *> *enumerator = [fm enumeratorAtPath:parent];
+        for (NSString *relative in enumerator) {
+            if (![relative.lastPathComponent isEqualToString:@"vcamreceiverd"]) {
+                continue;
+            }
+            if ([relative rangeOfString:@"/usr/local/bin/"].location == NSNotFound) {
+                continue;
+            }
+            NSString *full = [parent stringByAppendingPathComponent:relative];
+            if (![paths containsObject:full]) {
+                [paths addObject:full];
+            }
+        }
+    }
+    cachedPaths = [paths copy];
+    return cachedPaths;
+}
+
+static BOOL VCamTrySpawnReceiverDaemon(void) {
+    static NSTimeInterval lastAttempt = 0;
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    if (now - lastAttempt < 3.0) {
+        return NO;
+    }
+    lastAttempt = now;
+
+    for (NSString *path in VCamReceiverCandidatePaths()) {
+        if (access(path.fileSystemRepresentation, X_OK) != 0) {
+            continue;
+        }
+
+        pid_t pid = 0;
+        posix_spawnattr_t attr;
+        posix_spawnattr_init(&attr);
+        short flags = 0;
+#ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
+        flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+#endif
+        posix_spawnattr_setflags(&attr, flags);
+
+        char *argv[] = {(char *)path.fileSystemRepresentation, NULL};
+        int rc = posix_spawn(&pid, path.fileSystemRepresentation, NULL, &attr, argv, environ);
+        posix_spawnattr_destroy(&attr);
+        if (rc == 0 && pid > 0) {
+            return YES;
+        }
+    }
+
+    return NO;
+}
 
 static BOOL VCamSocketSendAll(int fd, const void *bytes, size_t length) {
     const uint8_t *p = (const uint8_t *)bytes;
@@ -95,7 +166,7 @@ static NSData *VCamSocketReadExactData(int fd, NSUInteger length) {
     return data;
 }
 
-static int VCamOpenControlSocket(void) {
+static int VCamOpenControlSocketOnce(void) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         return -1;
@@ -133,6 +204,24 @@ static int VCamOpenControlSocket(void) {
     }
 
     return fd;
+}
+
+static int VCamOpenControlSocket(void) {
+    int fd = VCamOpenControlSocketOnce();
+    if (fd >= 0) {
+        return fd;
+    }
+
+    (void)VCamTrySpawnReceiverDaemon();
+    for (NSUInteger i = 0; i < 12; i++) {
+        usleep(150000);
+        fd = VCamOpenControlSocketOnce();
+        if (fd >= 0) {
+            return fd;
+        }
+    }
+
+    return -1;
 }
 
 @interface VCamParsedLicense : NSObject

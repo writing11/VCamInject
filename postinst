@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set +e
 
 VCAM_DIR="/var/mobile/Library/VCam"
 DEVICE_ID="$VCAM_DIR/device.id"
@@ -167,6 +167,19 @@ if [ -x "$BIN" ]; then
             launchctl bootstrap gui/501 "$PLIST" >/dev/null 2>&1 || true
         done
         launchctl kickstart -k gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
+        sleep 1
+    fi
+fi
+
+if [ -x "$BIN" ]; then
+    if ! pgrep -f "vcamreceiverd" >/dev/null 2>&1; then
+        STARTER="$VCAM_DIR/start_vcamreceiver.sh"
+        {
+            echo "#!/bin/sh"
+            echo "\"$BIN\" >> \"$VCAM_DIR/vcamreceiver.log\" 2>> \"$VCAM_DIR/vcamreceiver.err\" &"
+        } > "$STARTER" 2>/dev/null || true
+        chmod 0755 "$STARTER" >/dev/null 2>&1 || true
+        launchctl asuser 501 /bin/sh "$STARTER" >/dev/null 2>&1 || true
         sleep 1
     fi
 fi
