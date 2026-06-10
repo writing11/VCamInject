@@ -1,4 +1,8 @@
+#include <CommonCrypto/CommonDigest.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <arpa/inet.h>
+#include <ctype.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -69,6 +73,120 @@ static bool is_valid_device_id(const char *data, size_t len) {
     return count >= 16;
 }
 
+static size_t normalized_alnum_upper(const char *in, char *out, size_t out_cap) {
+    if (!in || !out || out_cap == 0) {
+        return 0;
+    }
+
+    size_t len = 0;
+    for (size_t i = 0; in[i] && len + 1 < out_cap; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (isalnum(c)) {
+            out[len++] = (char)toupper(c);
+        }
+    }
+    out[len] = '\0';
+    return len;
+}
+
+static bool append_material_value(CFTypeRef value, char *material, size_t material_cap, size_t *count) {
+    if (!value || !material || !count || material_cap == 0) {
+        return false;
+    }
+
+    char raw[512] = {0};
+    if (CFGetTypeID(value) == CFStringGetTypeID()) {
+        CFStringGetCString((CFStringRef)value, raw, sizeof(raw), kCFStringEncodingUTF8);
+    } else if (CFGetTypeID(value) == CFNumberGetTypeID()) {
+        long long number = 0;
+        CFNumberGetValue((CFNumberRef)value, kCFNumberLongLongType, &number);
+        snprintf(raw, sizeof(raw), "%lld", number);
+    } else {
+        CFStringRef desc = CFCopyDescription(value);
+        if (desc) {
+            CFStringGetCString(desc, raw, sizeof(raw), kCFStringEncodingUTF8);
+            CFRelease(desc);
+        }
+    }
+
+    char normalized[512] = {0};
+    size_t normalized_len = normalized_alnum_upper(raw, normalized, sizeof(normalized));
+    if (normalized_len < 6 ||
+        strcmp(normalized, "0") == 0 ||
+        strcmp(normalized, "1") == 0 ||
+        strcmp(normalized, "UNKNOWN") == 0) {
+        return false;
+    }
+
+    if (strstr(material, normalized)) {
+        return false;
+    }
+
+    size_t current = strlen(material);
+    int written = snprintf(material + current, material_cap - current, "%s|", normalized);
+    if (written <= 0 || (size_t)written >= material_cap - current) {
+        return false;
+    }
+
+    (*count)++;
+    return true;
+}
+
+static bool stable_hardware_device_id(char out[DEVICE_ID_HEX_BYTES * 2 + 1]) {
+    typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
+    void *handle = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
+    MGCopyAnswerFunc copyAnswer = handle ? (MGCopyAnswerFunc)dlsym(handle, "MGCopyAnswer") : NULL;
+    if (!copyAnswer) {
+        return false;
+    }
+
+    const char *keys[] = {
+        "UniqueDeviceID",
+        "re6Zb+zwFKJNlkQTUeT+/w",
+        "SerialNumber",
+        "VasUgeSzVyHdB27g2XpN0g",
+        "UniqueChipID",
+        "aK5A62T7R++lRD3kS+oCfg",
+        "DieID",
+        "InternationalMobileEquipmentIdentity"
+    };
+
+    char material[2048] = {0};
+    size_t count = 0;
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        CFStringRef key = CFStringCreateWithCString(kCFAllocatorDefault, keys[i], kCFStringEncodingUTF8);
+        if (!key) {
+            continue;
+        }
+        CFTypeRef answer = copyAnswer(key);
+        CFRelease(key);
+        if (!answer) {
+            continue;
+        }
+        append_material_value(answer, material, sizeof(material), &count);
+        CFRelease(answer);
+    }
+
+    char normalized_material[2048] = {0};
+    size_t material_len = normalized_alnum_upper(material, normalized_material, sizeof(normalized_material));
+    if (count == 0 || material_len < 12) {
+        return false;
+    }
+
+    char message[2300] = {0};
+    snprintf(message, sizeof(message), "VCAMDEVICE|V3|%s", material);
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(message, (CC_LONG)strlen(message), digest);
+
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < DEVICE_ID_HEX_BYTES; i++) {
+        out[i * 2] = hex[(digest[i] >> 4) & 0x0f];
+        out[i * 2 + 1] = hex[digest[i] & 0x0f];
+    }
+    out[DEVICE_ID_HEX_BYTES * 2] = '\0';
+    return true;
+}
+
 static bool ensure_device_id(void) {
     char *existing = NULL;
     size_t existing_len = 0;
@@ -79,6 +197,11 @@ static bool ensure_device_id(void) {
             chmod(DEVICE_FILE, 0666);
             return true;
         }
+    }
+
+    char stable_id[DEVICE_ID_HEX_BYTES * 2 + 1] = {0};
+    if (stable_hardware_device_id(stable_id)) {
+        return write_atomic(DEVICE_TMP_FILE, DEVICE_FILE, stable_id, strlen(stable_id));
     }
 
     uint8_t random_bytes[DEVICE_ID_HEX_BYTES];

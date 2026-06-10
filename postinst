@@ -7,23 +7,18 @@ LICENSE_KEY="$VCAM_DIR/license.key"
 TRIAL_START="$VCAM_DIR/trial.start"
 
 mkdir -p "$VCAM_DIR"
+touch "$LICENSE_KEY" "$TRIAL_START" >/dev/null 2>&1 || true
 
 CURRENT_DEVICE_ID=""
 if [ -f "$DEVICE_ID" ]; then
     CURRENT_DEVICE_ID="$(tr -cd '[:alnum:]' < "$DEVICE_ID" | tr '[:lower:]' '[:upper:]')"
 fi
 
-if [ ${#CURRENT_DEVICE_ID} -lt 16 ] || echo "$CURRENT_DEVICE_ID" | grep -q '^VCAMDEVICEIDNOTSAVED'; then
-    if [ -r /dev/urandom ]; then
-        od -An -N16 -tx1 /dev/urandom | tr -d ' \n' | tr '[:lower:]' '[:upper:]' > "$DEVICE_ID"
-    elif command -v uuidgen >/dev/null 2>&1; then
-        uuidgen | tr -d '-' | tr '[:lower:]' '[:upper:]' > "$DEVICE_ID"
-    else
-        date +%s%N | awk '{print "VCAM" $1 "DEVICEID"}' > "$DEVICE_ID"
+if [ ! -s "$LICENSE_KEY" ]; then
+    if [ ${#CURRENT_DEVICE_ID} -lt 16 ] || echo "$CURRENT_DEVICE_ID" | grep -q '^VCAMDEVICEIDNOTSAVED'; then
+        rm -f "$DEVICE_ID" >/dev/null 2>&1 || true
     fi
 fi
-
-touch "$LICENSE_KEY" "$TRIAL_START" >/dev/null 2>&1 || true
 
 chown -R mobile:mobile "$VCAM_DIR" >/dev/null 2>&1 || true
 chmod 0777 "$VCAM_DIR" >/dev/null 2>&1 || true
@@ -32,12 +27,23 @@ chmod 0666 "$LICENSE_KEY" >/dev/null 2>&1 || true
 chmod 0666 "$TRIAL_START" >/dev/null 2>&1 || true
 chmod 0666 "$VCAM_DIR"/source.* >/dev/null 2>&1 || true
 
+JBROOT=""
+if command -v jbroot >/dev/null 2>&1; then
+    JBROOT="$(jbroot 2>/dev/null || true)"
+fi
+if [ -z "$JBROOT" ] && [ -d /var/jb ]; then
+    JBROOT="/var/jb"
+fi
+
 BIN=""
 for CANDIDATE in \
+    "$JBROOT/usr/local/bin/vcamreceiverd" \
     /var/jb/usr/local/bin/vcamreceiverd \
-    /usr/local/bin/vcamreceiverd
+    /usr/local/bin/vcamreceiverd \
+    /private/preboot/*/jb-*/usr/local/bin/vcamreceiverd \
+    /var/containers/Bundle/Application/.jbroot-*/usr/local/bin/vcamreceiverd
 do
-    if [ -x "$CANDIDATE" ]; then
+    if [ -n "$CANDIDATE" ] && [ -x "$CANDIDATE" ]; then
         BIN="$CANDIDATE"
         break
     fi
@@ -53,9 +59,13 @@ fi
 
 chmod 0755 "$BIN" >/dev/null 2>&1 || true
 
-PLIST_DIR="/Library/LaunchDaemons"
-if [ -d /var/jb ] || [ -d /var/jb/Library ]; then
+PLIST_DIR=""
+if [ -n "$JBROOT" ] && [ -d "$JBROOT" ]; then
+    PLIST_DIR="$JBROOT/Library/LaunchDaemons"
+elif [ -d /var/jb ] || [ -d /var/jb/Library ]; then
     PLIST_DIR="/var/jb/Library/LaunchDaemons"
+else
+    PLIST_DIR="/Library/LaunchDaemons"
 fi
 mkdir -p "$PLIST_DIR"
 PLIST="$PLIST_DIR/com.qianmian.vcamreceiver.plist"

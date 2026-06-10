@@ -3,6 +3,7 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <CommonCrypto/CommonHMAC.h>
 #import <arpa/inet.h>
+#import <dlfcn.h>
 #import <errno.h>
 #import <math.h>
 #import <netinet/in.h>
@@ -284,6 +285,12 @@ static int VCamOpenControlSocket(void) {
         return [self cacheAndReturnDeviceCode:normalized];
     }
 
+    NSString *systemCode = [self stableSystemDeviceCode];
+    if (systemCode.length >= 16) {
+        [self saveDeviceCodeIfPossible:systemCode];
+        return [self cacheAndReturnDeviceCode:systemCode];
+    }
+
     return @"\u5168\u5c40\u670d\u52a1\u672a\u542f\u52a8";
 }
 
@@ -508,6 +515,57 @@ static int VCamOpenControlSocket(void) {
     return hex;
 }
 
+- (NSString *)stableSystemDeviceCode {
+    typedef CFTypeRef (*MGCopyAnswerFunc)(CFStringRef);
+    void *handle = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
+    MGCopyAnswerFunc copyAnswer = handle ? (MGCopyAnswerFunc)dlsym(handle, "MGCopyAnswer") : NULL;
+    if (!copyAnswer) {
+        return nil;
+    }
+
+    NSArray<NSString *> *keys = @[
+        @"UniqueDeviceID",
+        @"re6Zb+zwFKJNlkQTUeT+/w",
+        @"SerialNumber",
+        @"VasUgeSzVyHdB27g2XpN0g",
+        @"UniqueChipID",
+        @"aK5A62T7R++lRD3kS+oCfg",
+        @"DieID",
+        @"InternationalMobileEquipmentIdentity"
+    ];
+
+    NSMutableArray<NSString *> *values = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    for (NSString *key in keys) {
+        CFTypeRef answer = copyAnswer((__bridge CFStringRef)key);
+        if (!answer) {
+            continue;
+        }
+
+        NSString *value = [self normalizedAlphaNumeric:[(__bridge id)answer description]];
+        CFRelease(answer);
+        if (value.length < 6 ||
+            [value isEqualToString:@"0"] ||
+            [value isEqualToString:@"1"] ||
+            [value isEqualToString:@"UNKNOWN"] ||
+            [seen containsObject:value]) {
+            continue;
+        }
+
+        [seen addObject:value];
+        [values addObject:value];
+    }
+
+    NSString *joined = [values componentsJoinedByString:@"|"];
+    NSString *material = [self normalizedAlphaNumeric:joined];
+    if (values.count == 0 || material.length < 12) {
+        return nil;
+    }
+
+    NSString *hash = [self sha256HexForText:[NSString stringWithFormat:@"VCAMDEVICE|V3|%@", joined]];
+    return [[hash substringToIndex:32] uppercaseString];
+}
+
 - (VCamParsedLicense *)parsedLicenseFromStoredCode {
     NSMutableArray<NSString *> *codes = [NSMutableArray array];
     @synchronized (VCamLicense.class) {
@@ -677,6 +735,7 @@ static int VCamOpenControlSocket(void) {
     [self addDeviceCodeCandidate:gVCamCachedDeviceCode toArray:candidates seen:seen];
     [self addDeviceCodeCandidate:[self rawDeviceCode] toArray:candidates seen:seen];
     [self addDeviceCodeCandidate:[NSString stringWithContentsOfFile:kVCamDevicePath encoding:NSUTF8StringEncoding error:nil] toArray:candidates seen:seen];
+    [self addDeviceCodeCandidate:[self stableSystemDeviceCode] toArray:candidates seen:seen];
 
     return candidates;
 }

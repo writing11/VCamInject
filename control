@@ -1,6 +1,6 @@
 Package: com.qianmian.vcaminject
 Name: VCam Inject
-Version: 0.1.1
+Version: 0.1.2
 Architecture: iphoneos-arm
 Description: Replace AVFoundation camera sample buffers with virtual frames.
 Maintainer: qianmian
