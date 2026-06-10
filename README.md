@@ -70,11 +70,11 @@ This version stores activation and trial time globally through `vcamreceiverd`. 
 /var/mobile/Library/VCam/device.id
 ```
 
-Injected apps read and write those values through the daemon, the shared files above, and a named global pasteboard fallback. One activation and one 2-hour trial timer are shared across injected apps. This build no longer writes activation or trial state into each host app's own defaults.
+Injected apps read and write those values through the daemon and the shared files above. One activation and one 2-hour trial timer are shared across injected apps. This build no longer writes activation or trial state into each host app's own defaults, and it no longer treats app-local pasteboard storage as a successful activation.
 
 If different apps show different device codes, the global daemon is not running or the old package is still installed. In this version the app side does not generate random device codes anymore. It first uses the global daemon/shared file, then falls back to a hardware-derived device code. Only if both are unavailable will the activation dialog show `全局服务未启动`.
 
-For this package, the device-code fallback order is `vcamreceiverd`, shared file, hardware-derived code, public device-profile code, then named global pasteboard cache. The app side does not generate random per-app device codes anymore.
+For this package, the device-code fallback order is `vcamreceiverd`, shared file, hardware-derived code, then public device-profile code. The app side does not generate random per-app device codes anymore.
 
 ## Priority Order
 

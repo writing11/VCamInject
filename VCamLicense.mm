@@ -21,7 +21,6 @@ static NSString * const kVCamTrialStartPath = @"/var/mobile/Library/VCam/trial.s
 static NSString * const kVCamDefaultsDeviceKey = @"device.id";
 static NSString * const kVCamDefaultsLicenseKey = @"license.key";
 static NSString * const kVCamDefaultsTrialStartKey = @"trial.start";
-static NSString * const kVCamPasteboardName = @"com.qianmian.vcam.global.store";
 static NSString * const kVCamLicenseSecret = @"QIANMIAN-VCAM-ACTIVATION-V2-2026";
 static NSTimeInterval const kVCamTrialDuration = 2 * 60 * 60;
 static const int kVCamDaemonPort = 9999;
@@ -362,8 +361,7 @@ static int VCamOpenControlSocket(void) {
         }
     }
 
-    BOOL wrotePasteboard = [self writePasteboardString:value forKey:key];
-    return wroteDaemon || wroteFile || wrotePasteboard;
+    return wroteDaemon || wroteFile;
 }
 
 - (NSString *)persistentDefaultsStringForKey:(NSString *)key {
@@ -378,8 +376,7 @@ static int VCamOpenControlSocket(void) {
         return value;
     }
 
-    value = [self pasteboardStringForKey:key];
-    return value.length > 0 ? value : nil;
+    return nil;
 }
 
 - (void)removePersistentDefaultsValueForKey:(NSString *)key {
@@ -388,7 +385,6 @@ static int VCamOpenControlSocket(void) {
     if (filePath.length > 0) {
         [NSFileManager.defaultManager removeItemAtPath:filePath error:nil];
     }
-    [self removePasteboardStringForKey:key];
 }
 
 - (NSString *)daemonStringForKey:(NSString *)key {
@@ -462,69 +458,6 @@ static int VCamOpenControlSocket(void) {
         (void)VCamSocketReadLine(fd);
     }
     close(fd);
-}
-
-- (BOOL)writePasteboardString:(NSString *)value forKey:(NSString *)key {
-    if (value.length == 0 || key.length == 0) {
-        return NO;
-    }
-
-    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
-    store[key] = value;
-    return [self savePasteboardStore:store];
-}
-
-- (NSString *)pasteboardStringForKey:(NSString *)key {
-    if (key.length == 0) {
-        return nil;
-    }
-    return [self pasteboardStore][key];
-}
-
-- (void)removePasteboardStringForKey:(NSString *)key {
-    if (key.length == 0) {
-        return;
-    }
-    NSMutableDictionary<NSString *, NSString *> *store = [self pasteboardStore];
-    [store removeObjectForKey:key];
-    [self savePasteboardStore:store];
-}
-
-- (NSMutableDictionary<NSString *, NSString *> *)pasteboardStore {
-    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
-    NSString *payload = pasteboard.string ?: @"";
-    NSMutableDictionary<NSString *, NSString *> *store = [NSMutableDictionary dictionary];
-    for (NSString *line in [payload componentsSeparatedByString:@"\n"]) {
-        NSRange sep = [line rangeOfString:@"="];
-        if (sep.location == NSNotFound || sep.location == 0) {
-            continue;
-        }
-        NSString *key = [line substringToIndex:sep.location];
-        NSString *value = [line substringFromIndex:sep.location + sep.length];
-        if (key.length > 0 && value.length > 0) {
-            store[key] = value;
-        }
-    }
-    return store;
-}
-
-- (BOOL)savePasteboardStore:(NSDictionary<NSString *, NSString *> *)store {
-    UIPasteboard *pasteboard = [UIPasteboard pasteboardWithName:kVCamPasteboardName create:YES];
-    NSMutableArray<NSString *> *lines = [NSMutableArray array];
-    for (NSString *key in store.allKeys) {
-        NSString *value = store[key];
-        if (key.length > 0 && value.length > 0) {
-            [lines addObject:[NSString stringWithFormat:@"%@=%@", key, value]];
-        }
-    }
-    pasteboard.string = [lines componentsJoinedByString:@"\n"];
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if ([pasteboard respondsToSelector:@selector(setPersistent:)]) {
-        pasteboard.persistent = YES;
-    }
-#pragma clang diagnostic pop
-    return store.count == 0 || pasteboard.string.length > 0;
 }
 
 - (BOOL)saveDeviceCodeIfPossible:(NSString *)deviceCode {
