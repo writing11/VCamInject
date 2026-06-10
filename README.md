@@ -9,6 +9,8 @@ Install the generated `.deb` on the phone. The package installs both parts:
 
 You do not need to manually inject files into each app. The hook is still required internally because camera replacement must happen inside the app process that opens the camera.
 
+For devices where `dpkg` reports `system (iphoneos-arm64)`, use the GitHub Actions workflow named `Build Installable ARM64 Deb`. Do not use a workflow that runs `THEOS_PACKAGE_SCHEME=roothide`, because that produces `iphoneos-arm64e` packages.
+
 ## What This Build Does
 
 - Injects into apps that use `AVCaptureVideoDataOutput`, `AVCaptureVideoPreviewLayer`, or `AVCapturePhoto`.
