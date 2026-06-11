@@ -18,6 +18,7 @@ For devices where `dpkg` reports `system (iphoneos-arm64)`, use the GitHub Actio
 - Keeps the preview overlay hidden until a real virtual frame is ready, which helps avoid black photos in apps that capture the preview layer.
 - Replaces camera sample buffers with a selected phone-album video or PC raw-frame stream.
 - Exactly two-finger double tap shows or hides a floating black/gold `V` button.
+- Safari support is packaged as a separate `VCamInjectSafari` tweak target so the main camera-class filter stays stable.
 - Tap the floating `V` button to open the control menu.
 - When the floating `V` button is visible, pinch with two fingers on the screen to adjust virtual video size. The size only applies to the current app session and resets to 100% after reopening the app.
 - `Choose video and replace` opens the iOS video picker and enables replacement immediately after selection.

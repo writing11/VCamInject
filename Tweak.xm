@@ -50,8 +50,11 @@ static const void *kVCamProxyKey = &kVCamProxyKey;
 static const void *kVCamPreviewOverlayKey = &kVCamPreviewOverlayKey;
 static const void *kVCamPreviewTickerKey = &kVCamPreviewTickerKey;
 static const void *kVCamPreviewDisplayLinkKey = &kVCamPreviewDisplayLinkKey;
+static const void *kVCamControlTapTargetKey = &kVCamControlTapTargetKey;
+static const void *kVCamControlTapGestureKey = &kVCamControlTapGestureKey;
 
 static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer);
+static void VCamInstallControlGesture(UIWindow *window);
 
 static BOOL VCamIsSafariFamilyProcess(void) {
     NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
@@ -116,6 +119,56 @@ static CGImageRef VCamCreateDisplayCGImageFromJPEG(NSData *jpeg) {
 }
 
 @end
+
+@interface VCamControlTapTarget : NSObject <UIGestureRecognizerDelegate>
+@end
+
+@implementation VCamControlTapTarget
+
+- (void)vcamHandleTwoFingerDoubleTap:(UITapGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateRecognized) {
+        return;
+    }
+
+    UIWindow *window = (UIWindow *)gesture.view;
+    if (![window isKindOfClass:UIWindow.class]) {
+        return;
+    }
+
+    [[VCamVideoPicker sharedPicker] presentControlPanelFromWindow:window];
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+        shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    (void)gestureRecognizer;
+    (void)otherGestureRecognizer;
+    return YES;
+}
+
+@end
+
+static void VCamInstallControlGesture(UIWindow *window) {
+    if (!window) {
+        return;
+    }
+
+    if (objc_getAssociatedObject(window, kVCamControlTapGestureKey)) {
+        return;
+    }
+
+    VCamControlTapTarget *target = [VCamControlTapTarget new];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:target action:@selector(vcamHandleTwoFingerDoubleTap:)];
+    tap.numberOfTouchesRequired = 2;
+    tap.numberOfTapsRequired = 2;
+    tap.cancelsTouchesInView = NO;
+    tap.delaysTouchesBegan = NO;
+    tap.delaysTouchesEnded = NO;
+    tap.delegate = target;
+    [window addGestureRecognizer:tap];
+
+    objc_setAssociatedObject(window, kVCamControlTapTargetKey, target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(window, kVCamControlTapGestureKey, tap, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
 
 static CALayer *VCamOverlayLayerForPreview(AVCaptureVideoPreviewLayer *previewLayer, BOOL create) {
     if (!previewLayer) {
@@ -306,34 +359,19 @@ static void VCamUpdatePreviewLayer(AVCaptureVideoPreviewLayer *previewLayer) {
 
 %hook UIWindow
 
+- (void)makeKeyAndVisible {
+    VCamInstallControlGesture(self);
+    %orig;
+}
+
+- (void)setRootViewController:(UIViewController *)rootViewController {
+    %orig(rootViewController);
+    VCamInstallControlGesture(self);
+}
+
 - (void)sendEvent:(UIEvent *)event {
+    VCamInstallControlGesture(self);
     %orig(event);
-
-    if (event.type != UIEventTypeTouches) {
-        return;
-    }
-
-    NSSet<UITouch *> *touches = [event touchesForWindow:self];
-    if (touches.count != 2) {
-        return;
-    }
-
-    NSUInteger beganCount = 0;
-    BOOL allSecondTap = YES;
-    for (UITouch *touch in touches) {
-        if (touch.phase == UITouchPhaseBegan) {
-            beganCount++;
-        }
-        if (touch.tapCount != 2) {
-            allSecondTap = NO;
-        }
-    }
-
-    if (beganCount != 2 || !allSecondTap) {
-        return;
-    }
-
-    [[VCamVideoPicker sharedPicker] presentControlPanelFromWindow:self];
 }
 
 %end

@@ -3,12 +3,17 @@ TARGET := iphone:clang:latest:14.0
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = VCamInject
+TWEAK_NAME = VCamInject VCamInjectSafari
 VCamInject_FILES = Tweak.xm VCamFrameProvider.mm VCamVideoPicker.mm VCamLicense.mm
 VCamInject_CFLAGS = -fobjc-arc -Wall -Wextra
 VCamInject_CCFLAGS = -std=gnu++14
 VCamInject_CXXFLAGS = -std=gnu++14
 VCamInject_FRAMEWORKS = AVFoundation CoreMedia CoreVideo CoreImage ImageIO UIKit PhotosUI QuartzCore
+VCamInjectSafari_FILES = Tweak.xm VCamFrameProvider.mm VCamVideoPicker.mm VCamLicense.mm
+VCamInjectSafari_CFLAGS = -fobjc-arc -Wall -Wextra -DVCAM_SAFARI_BUILD=1
+VCamInjectSafari_CCFLAGS = -std=gnu++14
+VCamInjectSafari_CXXFLAGS = -std=gnu++14
+VCamInjectSafari_FRAMEWORKS = AVFoundation CoreMedia CoreVideo CoreImage ImageIO UIKit PhotosUI QuartzCore
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

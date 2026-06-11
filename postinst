@@ -110,14 +110,14 @@ write_plist() {
     PLIST_DIR="$1"
     [ -n "$PLIST_DIR" ] || return 1
     mkdir -p "$PLIST_DIR" >/dev/null 2>&1 || return 1
-    PLIST="$PLIST_DIR/com.qianmian.vcamreceiver.plist"
+    PLIST="$PLIST_DIR/com.dingzhi.vcamreceiver.plist"
     cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.qianmian.vcamreceiver</string>
+    <string>com.dingzhi.vcamreceiver</string>
     <key>ProgramArguments</key>
     <array>
         <string>$LAUNCH_BIN</string>
@@ -142,14 +142,14 @@ write_agent_plist() {
     PLIST_DIR="$1"
     [ -n "$PLIST_DIR" ] || return 1
     mkdir -p "$PLIST_DIR" >/dev/null 2>&1 || return 1
-    PLIST="$PLIST_DIR/com.qianmian.vcamreceiver.mobile.plist"
+    PLIST="$PLIST_DIR/com.dingzhi.vcamreceiver.mobile.plist"
     cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.qianmian.vcamreceiver.mobile</string>
+    <string>com.dingzhi.vcamreceiver.mobile</string>
     <key>ProgramArguments</key>
     <array>
         <string>$LAUNCH_BIN</string>
@@ -191,21 +191,23 @@ if [ -d /var/jb ] || [ -d /var/jb/Library ]; then
 fi
 
 launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+launchctl bootout system/com.dingzhi.vcamreceiver >/dev/null 2>&1 || true
 for PLIST in $PLISTS; do
     launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
     launchctl bootstrap system "$PLIST" >/dev/null 2>&1 || true
 done
-launchctl kickstart -k system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+launchctl kickstart -k system/com.dingzhi.vcamreceiver >/dev/null 2>&1 || true
 
 sleep 1
 if [ -x "$BIN" ]; then
     if ! is_vcam_running; then
         launchctl bootout gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
+        launchctl bootout gui/501/com.dingzhi.vcamreceiver.mobile >/dev/null 2>&1 || true
         for PLIST in $AGENTS; do
             launchctl bootout gui/501 "$PLIST" >/dev/null 2>&1 || true
             launchctl bootstrap gui/501 "$PLIST" >/dev/null 2>&1 || true
         done
-        launchctl kickstart -k gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
+        launchctl kickstart -k gui/501/com.dingzhi.vcamreceiver.mobile >/dev/null 2>&1 || true
         sleep 1
     fi
 fi

@@ -10,13 +10,21 @@ if [ -z "$JBROOT" ] && [ -d /var/jb ]; then
 fi
 
 launchctl bootout system/com.qianmian.vcamreceiver >/dev/null 2>&1 || true
+launchctl bootout system/com.dingzhi.vcamreceiver >/dev/null 2>&1 || true
 [ -n "$JBROOT" ] && launchctl bootout system "$JBROOT/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist" >/dev/null 2>&1 || true
+[ -n "$JBROOT" ] && launchctl bootout system "$JBROOT/Library/LaunchDaemons/com.dingzhi.vcamreceiver.plist" >/dev/null 2>&1 || true
 launchctl bootout system /var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
+launchctl bootout system /var/jb/Library/LaunchDaemons/com.dingzhi.vcamreceiver.plist >/dev/null 2>&1 || true
 launchctl bootout system /Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
+launchctl bootout system /Library/LaunchDaemons/com.dingzhi.vcamreceiver.plist >/dev/null 2>&1 || true
 launchctl bootout gui/501/com.qianmian.vcamreceiver.mobile >/dev/null 2>&1 || true
+launchctl bootout gui/501/com.dingzhi.vcamreceiver.mobile >/dev/null 2>&1 || true
 [ -n "$JBROOT" ] && launchctl bootout gui/501 "$JBROOT/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist" >/dev/null 2>&1 || true
+[ -n "$JBROOT" ] && launchctl bootout gui/501 "$JBROOT/Library/LaunchAgents/com.dingzhi.vcamreceiver.mobile.plist" >/dev/null 2>&1 || true
 launchctl bootout gui/501 /var/jb/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
+launchctl bootout gui/501 /var/jb/Library/LaunchAgents/com.dingzhi.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
 launchctl bootout gui/501 /Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
+launchctl bootout gui/501 /Library/LaunchAgents/com.dingzhi.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
 
 if [ -f /var/mobile/Library/VCam/vcamreceiver.pid ]; then
     kill "$(cat /var/mobile/Library/VCam/vcamreceiver.pid)" >/dev/null 2>&1 || true
@@ -30,10 +38,16 @@ else
     done
 fi
 [ -n "$JBROOT" ] && rm -f "$JBROOT/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist" >/dev/null 2>&1 || true
+[ -n "$JBROOT" ] && rm -f "$JBROOT/Library/LaunchDaemons/com.dingzhi.vcamreceiver.plist" >/dev/null 2>&1 || true
 [ -n "$JBROOT" ] && rm -f "$JBROOT/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist" >/dev/null 2>&1 || true
+[ -n "$JBROOT" ] && rm -f "$JBROOT/Library/LaunchAgents/com.dingzhi.vcamreceiver.mobile.plist" >/dev/null 2>&1 || true
 rm -f /var/jb/Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
+rm -f /var/jb/Library/LaunchDaemons/com.dingzhi.vcamreceiver.plist >/dev/null 2>&1 || true
 rm -f /var/jb/Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
+rm -f /var/jb/Library/LaunchAgents/com.dingzhi.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
 rm -f /Library/LaunchDaemons/com.qianmian.vcamreceiver.plist >/dev/null 2>&1 || true
+rm -f /Library/LaunchDaemons/com.dingzhi.vcamreceiver.plist >/dev/null 2>&1 || true
 rm -f /Library/LaunchAgents/com.qianmian.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
+rm -f /Library/LaunchAgents/com.dingzhi.vcamreceiver.mobile.plist >/dev/null 2>&1 || true
 
 exit 0

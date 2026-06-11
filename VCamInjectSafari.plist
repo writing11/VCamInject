@@ -1,0 +1,10 @@
+{
+    Filter = {
+        Executables = (
+            "MobileSafari",
+            "com.apple.WebKit.WebContent",
+            "WebContent",
+            "WebKit"
+        );
+    };
+}
